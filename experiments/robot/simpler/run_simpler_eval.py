@@ -39,7 +39,7 @@ from experiments.robot.simpler.simpler_utils import (
 
 # Append current directory so that interpreter can find experiments.robot
 sys.path.append("../..")
-from experiments.robot.libero.libero_utils import (
+from experiments.robot.openvla_utils import (
     save_rollout_video,
 )
 from experiments.robot.openvla_utils import get_processor
