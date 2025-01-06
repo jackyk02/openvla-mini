@@ -185,7 +185,7 @@ def apply_center_crop(im, t_h, t_w):
     crop_w = int((im.shape[-2] - t_w) / 2)
     return im[..., crop_h : crop_h + t_h, crop_w : crop_w + t_w, :]
 
-
+#
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
     """Generates an action with the VLA policy."""
 
@@ -220,6 +220,12 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         # Convert back to PIL Image
         image = Image.fromarray(image.numpy())
         image = image.convert("RGB")
+
+        # Save processed image and path for Inference
+        transfer_dir = f"./transfer_images/"
+        os.makedirs(transfer_dir, exist_ok=True)
+        image_path = f"{transfer_dir}/vla_processed_img.jpg"
+        image.save(image_path)
 
     # Build VLA prompt
     if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
