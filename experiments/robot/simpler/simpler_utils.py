@@ -5,7 +5,17 @@ from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_ob
 from transforms3d.euler import euler2axangle
 
 from experiments.robot.robot_utils import normalize_gripper_action
+from PIL import Image
 
+def save_reward_img(image):
+    image = tf.image.encode_jpeg(image)  # Encode as JPEG, as done in RLDS dataset builder
+    image = tf.io.decode_image(image, expand_animations=False, dtype=tf.uint8)  # Immediately decode back
+    image = tf.image.resize(
+        image, (256, 256), method="lanczos3", antialias=True
+    )
+    image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
+    image = image.numpy()
+    Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/reward_img.png")
 
 def get_simpler_img(env, obs, resize_size):
     """
@@ -16,6 +26,7 @@ def get_simpler_img(env, obs, resize_size):
     """
     assert isinstance(resize_size, int)
     image = get_image_from_maniskill2_obs_dict(env, obs)
+    save_reward_img(image) 
 
     # Preprocess the image the exact same way that the Berkeley Bridge folks did it
     # to minimize distribution shift.
