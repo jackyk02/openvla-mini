@@ -20,6 +20,37 @@ from prismatic.models.load import load_vla
 
 import requests
 import json_numpy as json
+
+def get_rewards(instruction, image_path, actions):
+    # Initialize rewards list
+    all_rewards = []
+    
+    # Process actions in batches of 4
+    batch_size = 4
+    num_batches = math.ceil(len(actions) / batch_size)
+    
+    for i in range(num_batches):
+        # Get the current batch of actions
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, len(actions))
+        action_batch = actions[start_idx:end_idx]
+        
+        # Prepare payload for the current batch
+        payload = {
+            "instruction": instruction,
+            "image_path": image_path,
+            "action": action_batch
+        }
+        
+        # Send request to server
+        response = requests.post("http://127.0.0.1:3100/process", data=json.dumps(payload))
+        response_data = json.loads(response.text)
+        
+        # Extend rewards list with batch results
+        all_rewards.extend(response_data["rewards"])
+    
+    return all_rewards
+
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
     Get batch predictions from the batch processing server.
@@ -275,13 +306,17 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=1,
-        temperature=0
+        batch_size=8,
+        temperature=0.1
     )
+    reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
+    rewards = get_rewards(instruction, reward_img, output_ids)
+    print(rewards)
+    selected_index = np.argmax(rewards)
     # print("ids: ", output_ids)
     # print("continuous: ", actions)
     # return action
-    return actions[0]
+    return actions[selected_index]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
