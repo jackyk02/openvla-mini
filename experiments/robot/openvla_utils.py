@@ -266,21 +266,6 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         os.makedirs(transfer_dir, exist_ok=True)
         image_path = f"{transfer_dir}/vla_processed_img.jpg"
         image.save(image_path)
-
-    # Build VLA prompt
-    if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
-        prompt = (
-            f"{OPENVLA_V01_SYSTEM_PROMPT} USER: What action should the robot take to {task_label.lower()}? ASSISTANT:"
-        )
-    else:  # OpenVLA
-        prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
-
-    # Process inputs.
-    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
-
-    # Get action.
-    action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)
-    # print("original vla: ", action)
     
     # Get action from SGLang
     instruction = task_label.lower()
