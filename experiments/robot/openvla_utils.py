@@ -21,6 +21,23 @@ from prismatic.models.load import load_vla
 import requests
 import json_numpy as json
 
+def preprocess_actions(output_ids, action):
+    # Convert arrays to numpy arrays if they aren't already
+    output_ids = np.array(output_ids)
+    output_ids = np.where(output_ids == 31775, 31774, output_ids)
+    action = np.array(action)
+    
+    # Get unique rows and their indices
+    # axis=0 ensures we're looking at complete rows rather than individual elements
+    # return_index=True gives us the indices of the first occurrence of each unique row
+    unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
+    
+    # Sort indices to maintain original order
+    indices = sorted(indices)
+    
+    # Return both arrays with only unique rows, maintaining alignment
+    return output_ids[indices], action[indices]
+
 def get_rewards(instruction, image_path, actions):
     # Initialize rewards list
     all_rewards = []
@@ -309,6 +326,11 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         batch_size=8,
         temperature=0.1
     )
+    output_ids, actions = preprocess_actions(output_ids, actions)
+
+    if len(output_ids)==1:
+        return actions[0]
+
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
     rewards = get_rewards(instruction, reward_img, output_ids)
     print(rewards)
