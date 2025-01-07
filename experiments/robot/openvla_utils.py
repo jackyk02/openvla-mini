@@ -26,6 +26,7 @@ def preprocess_actions(output_ids, action):
     output_ids = np.array(output_ids)
     output_ids = np.where(output_ids == 31775, 31774, output_ids)
     action = np.array(action)
+    output_ids, action = output_ids[np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)], action[np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)]
     
     # Get unique rows and their indices
     # axis=0 ensures we're looking at complete rows rather than individual elements
@@ -323,14 +324,24 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=8,
-        temperature=0.1
+        batch_size=16,
+        temperature=0.2
     )
-    output_ids, actions = preprocess_actions(output_ids, actions)
 
+    greedy_output_ids, greedy_actions = get_batch_actions(
+        instruction=instruction,
+        image_path=image_path,
+        batch_size=1,
+        temperature=0
+    )
+    output_ids = np.concatenate([output_ids, greedy_output_ids], axis=0)
+    actions = np.concatenate([actions, greedy_actions], axis=0)
+
+    output_ids, actions = preprocess_actions(output_ids, actions)
+    
     if len(output_ids)==1:
         return actions[0]
-
+    # print(output_ids)
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
     rewards = get_rewards(instruction, reward_img, output_ids)
     print(rewards)
