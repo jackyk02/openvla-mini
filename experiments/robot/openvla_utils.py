@@ -18,6 +18,46 @@ from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from prismatic.models.load import load_vla
 
+import requests
+import json_numpy as json
+def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
+    """
+    Get batch predictions from the batch processing server.
+    
+    Args:
+        instruction (str): The instruction for the robot
+        image_path (str): Path to the input image
+        batch_size (int, optional): Size of the batch. Defaults to 4.
+        temperature (float, optional): Sampling temperature. Defaults to 1.0.
+    
+    Returns:
+        numpy.ndarray: Array of predicted actions
+    """
+    # Verify image exists
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"Image not found at {image_path}")
+    
+    # Prepare the payload
+    payload = {
+        "instruction": instruction,
+        "image_path": image_path,
+        "batch_size": batch_size,
+        "temperature": temperature
+    }
+    
+    # Send request to server
+    response = requests.post(
+        "http://127.0.0.1:3200/batch",
+        data=json.dumps(payload),
+        headers={'Content-Type': 'application/json'}
+    )
+    
+    if response.status_code != 200:
+        raise Exception(f"Error from server: {response.text}")
+    
+    response_data = json.loads(response.text)
+    return np.array(response_data["actions"])
+
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
 DATE = time.strftime("%Y_%m_%d")
@@ -240,7 +280,21 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
 
     # Get action.
     action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)
-    return action
+    # print("original vla: ", action)
+    
+    # Get action from SGLang
+    instruction = task_label.lower()
+    image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
+    # print(instruction)
+    actions = get_batch_actions(
+        instruction=instruction,
+        image_path=image_path,
+        batch_size=1,
+        temperature=0
+    )
+    # print("sglang vla: ", actions)
+    # return action
+    return actions[0]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
