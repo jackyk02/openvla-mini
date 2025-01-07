@@ -56,7 +56,7 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
         raise Exception(f"Error from server: {response.text}")
     
     response_data = json.loads(response.text)
-    return np.array(response_data["actions"])
+    return np.array(response_data["output_ids"]), np.array(response_data["actions"])
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -272,13 +272,14 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     instruction = task_label.lower()
     image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
     # print(instruction)
-    actions = get_batch_actions(
+    output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
         batch_size=1,
         temperature=0
     )
-    # print("sglang vla: ", actions)
+    # print("ids: ", output_ids)
+    # print("continuous: ", actions)
     # return action
     return actions[0]
 
