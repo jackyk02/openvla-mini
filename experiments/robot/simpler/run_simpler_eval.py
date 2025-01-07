@@ -114,17 +114,17 @@ def eval_simpler(cfg: GenerateConfig) -> None:
     model = get_model(cfg)
 
     # [OpenVLA] Check that the model contains the action un-normalization key
-    if cfg.model_family in ["openvla", "prismatic"]:
-        # In some cases, the key must be manually modified (e.g. after training on a modified version of the dataset
-        # with the suffix "_no_noops" in the dataset name)
-        if cfg.unnorm_key not in model.norm_stats and f"{cfg.unnorm_key}_no_noops" in model.norm_stats:
-            cfg.unnorm_key = f"{cfg.unnorm_key}_no_noops"
-        assert cfg.unnorm_key in model.norm_stats, f"Action un-norm key {cfg.unnorm_key} not found in VLA `norm_stats`!"
+    # if cfg.model_family in ["openvla", "prismatic"]:
+    #     # In some cases, the key must be manually modified (e.g. after training on a modified version of the dataset
+    #     # with the suffix "_no_noops" in the dataset name)
+    #     if cfg.unnorm_key not in model.norm_stats and f"{cfg.unnorm_key}_no_noops" in model.norm_stats:
+    #         cfg.unnorm_key = f"{cfg.unnorm_key}_no_noops"
+    #     assert cfg.unnorm_key in model.norm_stats, f"Action un-norm key {cfg.unnorm_key} not found in VLA `norm_stats`!"
 
     # [OpenVLA] Get Hugging Face processor
-    processor = None
-    if cfg.model_family == "openvla":
-        processor = get_processor(cfg)
+    # processor = None
+    # if cfg.model_family == "openvla":
+    #     processor = get_processor(cfg)
 
     # Initialize local logging
     run_id = f"{cfg.prefix}EVAL-{cfg.task_suite_name}-{cfg.model_family}-{DATE_TIME}"
@@ -250,7 +250,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
                     model,
                     observation,
                     task_description,
-                    processor=processor,
+                    processor=None,
                 )
 
                 # TODO figure out if below is libero only

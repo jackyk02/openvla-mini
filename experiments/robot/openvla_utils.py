@@ -111,6 +111,7 @@ def get_prismatic_vla(cfg):
 
 def get_vla(cfg):
     """Loads and returns a VLA model from checkpoint."""
+    return None
     # Load VLA checkpoint.
     print("[*] Instantiating Pretrained VLA model")
     print("[*] Loading in BF16 with Flash-Attention Enabled")
