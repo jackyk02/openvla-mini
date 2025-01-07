@@ -21,16 +21,74 @@ from prismatic.models.load import load_vla
 import requests
 import json_numpy as json
 
+import numpy as np
+
+def select_action_index(rewards, temperature=0.1):
+    """
+    Select an action index based on rewards using a combination of top-k sampling rewards
+    and greedy action selection, with temperature-scaled softmax probabilities.
+    
+    Args:
+        rewards: numpy array of rewards where the last element is the greedy reward
+        temperature: temperature parameter for softmax (default: 0.1)
+                    Lower values make the distribution more peaked (more deterministic)
+    
+    Returns:
+        Selected action index in the original rewards array
+    """
+    # Convert rewards to numpy array if it isn't already
+    rewards = np.array(rewards)
+    
+    # Separate sampling rewards and greedy reward
+    sampling_rewards = rewards[:-1]
+    
+    # Get indices of top k sampling rewards (ensure integer type)
+    k = min(len(sampling_rewards), 2)  # Handle cases with fewer than 3 sampling rewards
+    top_k_indices = np.argsort(sampling_rewards)[-k:].astype(np.int64)
+    
+    # Combine top k indices with the greedy index (last index)
+    greedy_index = np.array([len(rewards) - 1], dtype=np.int64)
+    candidate_indices = np.concatenate([top_k_indices, greedy_index])
+    
+    # Get corresponding rewards for candidates
+    candidate_rewards = rewards[candidate_indices]
+    print(candidate_rewards)
+    
+    # Apply temperature-scaled softmax to get selection probabilities
+    scaled_rewards = candidate_rewards / temperature
+    exp_rewards = np.exp(scaled_rewards - np.max(scaled_rewards))  # subtract max for numerical stability
+    probabilities = exp_rewards / np.sum(exp_rewards)
+    print(probabilities)
+    
+    # Select index based on probabilities
+    selected_candidate_idx = np.random.choice(len(candidate_indices), p=probabilities)
+    selected_idx = int(candidate_indices[selected_candidate_idx])  # ensure integer output
+    
+    return selected_idx
+
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
     output_ids = np.where(output_ids == 31775, 31774, output_ids)
     action = np.array(action)
-    output_ids, action = output_ids[np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)], action[np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)]
+    
+    # Get the majority value for the last dimension of each row
+    last_dim_values = output_ids[:, -1]
+    majority_value = np.bincount(last_dim_values).argmax()
+    
+    # Create a mask for rows where the last value matches the majority
+    majority_mask = (output_ids[:, -1] == majority_value)
+    
+    # Filter arrays to keep only rows with majority value in last dimension
+    output_ids = output_ids[majority_mask]
+    action = action[majority_mask]
+    
+    # Apply the original range filter
+    range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
+    output_ids = output_ids[range_mask]
+    action = action[range_mask]
     
     # Get unique rows and their indices
-    # axis=0 ensures we're looking at complete rows rather than individual elements
-    # return_index=True gives us the indices of the first occurrence of each unique row
     unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
     
     # Sort indices to maintain original order
@@ -327,28 +385,36 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         batch_size=16,
         temperature=0.2
     )
-
-    greedy_output_ids, greedy_actions = get_batch_actions(
-        instruction=instruction,
-        image_path=image_path,
-        batch_size=1,
-        temperature=0
-    )
-    output_ids = np.concatenate([output_ids, greedy_output_ids], axis=0)
-    actions = np.concatenate([actions, greedy_actions], axis=0)
-
     output_ids, actions = preprocess_actions(output_ids, actions)
-    
+
+    # greedy_output_ids, greedy_actions = get_batch_actions(
+    #     instruction=instruction,
+    #     image_path=image_path,
+    #     batch_size=1,
+    #     temperature=0
+    # )
+    # greedy_output_ids, greedy_actions = preprocess_actions(greedy_output_ids, greedy_actions)
+
+    print(output_ids)
+
     if len(output_ids)==1:
         return actions[0]
-    # print(output_ids)
+    
+    # combine n_samples + greedy
+    # output_ids = np.concatenate([output_ids, greedy_output_ids], axis=0)
+    # actions = np.concatenate([actions, greedy_actions], axis=0)
+    
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
+    
     rewards = get_rewards(instruction, reward_img, output_ids)
-    print(rewards)
+    
+    # selected_index = select_action_index(rewards, temperature=0.5)
     selected_index = np.argmax(rewards)
     # print("ids: ", output_ids)
     # print("continuous: ", actions)
     # return action
+    # print("len: ", len(rewards))
+    # print("selected: ", selected_index)
     return actions[selected_index]
 
 
