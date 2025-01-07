@@ -15,7 +15,7 @@ def save_reward_img(image):
     )
     image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
     image = image.numpy()
-    Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/reward_img.png")
+    Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/reward_img.jpg")
 
 def get_simpler_img(env, obs, resize_size):
     """
