@@ -129,6 +129,11 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     image = Image.fromarray(obs["full_image"])
     image = image.convert("RGB")
 
+    transfer_dir = f"./transfer_images/"
+    os.makedirs(transfer_dir, exist_ok=True)
+    image_path = f"{transfer_dir}/vla_processed_img.jpg"
+    image.save(image_path)
+
     # (If trained with image augmentations) Center crop image and then resize back up to original size.
     # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
     #            the original height and width by sqrt(0.9) -- not 0.9!
