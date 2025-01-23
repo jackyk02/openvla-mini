@@ -23,127 +23,136 @@ import json_numpy as json
 
 import numpy as np
 
+
 def select_action_index(rewards, temperature=0.1):
     """
     Select an action index based on rewards using a combination of top-k sampling rewards
     and greedy action selection, with temperature-scaled softmax probabilities.
-    
+
     Args:
         rewards: numpy array of rewards where the last element is the greedy reward
         temperature: temperature parameter for softmax (default: 0.1)
                     Lower values make the distribution more peaked (more deterministic)
-    
+
     Returns:
         Selected action index in the original rewards array
     """
     # Convert rewards to numpy array if it isn't already
     rewards = np.array(rewards)
-    
+
     # Separate sampling rewards and greedy reward
     sampling_rewards = rewards[:-1]
-    
+
     # Get indices of top k sampling rewards (ensure integer type)
-    k = min(len(sampling_rewards), 2)  # Handle cases with fewer than 3 sampling rewards
+    # Handle cases with fewer than 3 sampling rewards
+    k = min(len(sampling_rewards), 2)
     top_k_indices = np.argsort(sampling_rewards)[-k:].astype(np.int64)
-    
+
     # Combine top k indices with the greedy index (last index)
     greedy_index = np.array([len(rewards) - 1], dtype=np.int64)
     candidate_indices = np.concatenate([top_k_indices, greedy_index])
-    
+
     # Get corresponding rewards for candidates
     candidate_rewards = rewards[candidate_indices]
     print(candidate_rewards)
-    
+
     # Apply temperature-scaled softmax to get selection probabilities
     scaled_rewards = candidate_rewards / temperature
-    exp_rewards = np.exp(scaled_rewards - np.max(scaled_rewards))  # subtract max for numerical stability
+    # subtract max for numerical stability
+    exp_rewards = np.exp(scaled_rewards - np.max(scaled_rewards))
     probabilities = exp_rewards / np.sum(exp_rewards)
     print(probabilities)
-    
+
     # Select index based on probabilities
-    selected_candidate_idx = np.random.choice(len(candidate_indices), p=probabilities)
-    selected_idx = int(candidate_indices[selected_candidate_idx])  # ensure integer output
-    
+    selected_candidate_idx = np.random.choice(
+        len(candidate_indices), p=probabilities)
+    # ensure integer output
+    selected_idx = int(candidate_indices[selected_candidate_idx])
+
     return selected_idx
+
 
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
     output_ids = np.where(output_ids == 31775, 31774, output_ids)
     action = np.array(action)
-    
+
     # Get the majority value for the last dimension of each row
     last_dim_values = output_ids[:, -1]
     majority_value = np.bincount(last_dim_values).argmax()
-    
+
     # Create a mask for rows where the last value matches the majority
     majority_mask = (output_ids[:, -1] == majority_value)
-    
+
     # Filter arrays to keep only rows with majority value in last dimension
     output_ids = output_ids[majority_mask]
     action = action[majority_mask]
-    
+
     # Apply the original range filter
     range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
     output_ids = output_ids[range_mask]
     action = action[range_mask]
-    
+
     # Get unique rows and their indices
     unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
-    
+
     # Sort indices to maintain original order
     indices = sorted(indices)
-    
+
     # Return both arrays with only unique rows, maintaining alignment
     return output_ids[indices], action[indices]
+
 
 def get_rewards(instruction, image_path, actions):
     # Initialize rewards list
     all_rewards = []
-    
+
     # Process actions in batches of 4
     batch_size = 4
     num_batches = math.ceil(len(actions) / batch_size)
-    
+
     for i in range(num_batches):
         # Get the current batch of actions
         start_idx = i * batch_size
         end_idx = min((i + 1) * batch_size, len(actions))
         action_batch = actions[start_idx:end_idx]
-        
+
         # Prepare payload for the current batch
         payload = {
             "instruction": instruction,
             "image_path": image_path,
             "action": action_batch
         }
-        
+
         # Send request to server
-        response = requests.post("http://127.0.0.1:3100/process", data=json.dumps(payload))
+        response = requests.post(
+            "http://127.0.0.1:3100/process", data=json.dumps(payload))
         response_data = json.loads(response.text)
-        
+
         # Extend rewards list with batch results
         all_rewards.extend(response_data["rewards"])
-    
+
     return all_rewards
+
 
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
     Get batch predictions from the batch processing server.
-    
+
     Args:
         instruction (str): The instruction for the robot
         image_path (str): Path to the input image
         batch_size (int, optional): Size of the batch. Defaults to 4.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
-    
+
     Returns:
         numpy.ndarray: Array of predicted actions
     """
     # Verify image exists
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
-    
+
     # Prepare the payload
     payload = {
         "instruction": instruction,
@@ -151,25 +160,27 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
         "batch_size": batch_size,
         "temperature": temperature
     }
-    
+
     # Send request to server
     response = requests.post(
         "http://127.0.0.1:3200/batch",
         data=json.dumps(payload),
         headers={'Content-Type': 'application/json'}
     )
-    
+
     if response.status_code != 200:
         raise Exception(f"Error from server: {response.text}")
-    
+
     response_data = json.loads(response.text)
     return np.array(response_data["output_ids"]), np.array(response_data["actions"])
+
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
 DATE = time.strftime("%Y_%m_%d")
 DATE_TIME = time.strftime("%Y_%m_%d-%H_%M_%S")
-DEVICE = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
+DEVICE = torch.device(
+    "cuda:0") if torch.cuda.is_available() else torch.device("cpu")
 np.set_printoptions(formatter={"float": lambda x: "{0:0.3f}".format(x)})
 
 # Initialize system prompt for OpenVLA v0.1.
@@ -178,11 +189,13 @@ OPENVLA_V01_SYSTEM_PROMPT = (
     "The assistant gives helpful, detailed, and polite answers to the user's questions."
 )
 
+
 def save_rollout_video(rollout_images, idx, success, task_description, log_file=None):
     """Saves an MP4 replay of an episode."""
     rollout_dir = f"./rollouts/{DATE}"
     os.makedirs(rollout_dir, exist_ok=True)
-    processed_task_description = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:50]
+    processed_task_description = task_description.lower().replace(
+        " ", "_").replace("\n", "_").replace(".", "_")[:50]
     mp4_path = f"{rollout_dir}/{DATE_TIME}--episode={idx}--success={success}--task={processed_task_description}.mp4"
     video_writer = imageio.get_writer(mp4_path, fps=30)
     for img in rollout_images:
@@ -192,12 +205,14 @@ def save_rollout_video(rollout_images, idx, success, task_description, log_file=
     if log_file is not None:
         log_file.write(f"Saved rollout MP4 at path {mp4_path}\n")
     return mp4_path
-    
+
+
 def get_prismatic_vla(cfg):
     """Loads and returns a VLA model from checkpoint."""
     # Prepare for model loading.
     print(f"[*] Initializing Generation Playground with `{cfg.model_family}`")
-    hf_token = cfg.hf_token.read_text().strip() if isinstance(cfg.hf_token, Path) else os.environ[cfg.hf_token]
+    hf_token = cfg.hf_token.read_text().strip() if isinstance(
+        cfg.hf_token, Path) else os.environ[cfg.hf_token]
     # set_seed(cfg.seed)
     # Load VLA checkpoint.
     print(f"Loading VLM from checkpoint: {cfg.pretrained_checkpoint}")
@@ -246,7 +261,8 @@ def get_vla(cfg):
         vla = vla.to(DEVICE)
 
     # Load dataset stats used during finetuning (for action un-normalization).
-    dataset_statistics_path = os.path.join(cfg.pretrained_checkpoint, "dataset_statistics.json")
+    dataset_statistics_path = os.path.join(
+        cfg.pretrained_checkpoint, "dataset_statistics.json")
     if os.path.isfile(dataset_statistics_path):
         with open(dataset_statistics_path, "r") as f:
             norm_stats = json.load(f)
@@ -263,7 +279,8 @@ def get_vla(cfg):
 
 def get_processor(cfg):
     """Get VLA model's Hugging Face processor."""
-    processor = AutoProcessor.from_pretrained(cfg.pretrained_checkpoint, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        cfg.pretrained_checkpoint, trust_remote_code=True)
     return processor
 
 
@@ -287,8 +304,10 @@ def crop_and_resize(image, crop_scale, batch_size):
         expanded_dims = True
 
     # Get height and width of crop
-    new_heights = tf.reshape(tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
-    new_widths = tf.reshape(tf.clip_by_value(tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
+    new_heights = tf.reshape(tf.clip_by_value(
+        tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
+    new_widths = tf.reshape(tf.clip_by_value(
+        tf.sqrt(crop_scale), 0, 1), shape=(batch_size,))
 
     # Get bounding box representing crop
     height_offsets = (1 - new_heights) / 2
@@ -304,7 +323,8 @@ def crop_and_resize(image, crop_scale, batch_size):
     )
 
     # Crop and then resize back up
-    image = tf.image.crop_and_resize(image, bounding_boxes, tf.range(batch_size), (224, 224))
+    image = tf.image.crop_and_resize(
+        image, bounding_boxes, tf.range(batch_size), (224, 224))
 
     # Convert back to 3D Tensor (H, W, C)
     if expanded_dims:
@@ -331,9 +351,11 @@ def apply_center_crop(im, t_h, t_w):
     assert im.shape[-1] in [1, 3, 6]
     crop_h = int((im.shape[-3] - t_h) / 2)
     crop_w = int((im.shape[-2] - t_w) / 2)
-    return im[..., crop_h : crop_h + t_h, crop_w : crop_w + t_w, :]
+    return im[..., crop_h: crop_h + t_h, crop_w: crop_w + t_w, :]
 
 #
+
+
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
     """Generates an action with the VLA policy."""
 
@@ -374,7 +396,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         os.makedirs(transfer_dir, exist_ok=True)
         image_path = f"{transfer_dir}/vla_processed_img.jpg"
         image.save(image_path)
-    
+
     # Get action from SGLang
     instruction = task_label.lower()
     image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
@@ -382,8 +404,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=16,
-        temperature=0.2
+        batch_size=50,
+        temperature=0.5
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
 
@@ -397,17 +419,17 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
 
     print(output_ids)
 
-    if len(output_ids)==1:
+    if len(output_ids) == 1:
         return actions[0]
-    
+
     # combine n_samples + greedy
     # output_ids = np.concatenate([output_ids, greedy_output_ids], axis=0)
     # actions = np.concatenate([actions, greedy_actions], axis=0)
-    
-    reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    
+
+    reward_img = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
+
     rewards = get_rewards(instruction, reward_img, output_ids)
-    
+
     # selected_index = select_action_index(rewards, temperature=0.5)
     selected_index = np.argmax(rewards)
     # print("ids: ", output_ids)
@@ -454,5 +476,6 @@ def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unn
     if len(processed_images) == 1:
         processed_images = processed_images[0]
 
-    action = vla.predict_action(processed_images, task_label, unnorm_key=unnorm_key, **kwargs)
+    action = vla.predict_action(
+        processed_images, task_label, unnorm_key=unnorm_key, **kwargs)
     return action
