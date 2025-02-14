@@ -129,12 +129,12 @@ def get_rewards(instruction, image_path, actions):
 
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
-    Get batch predictions from the batch processing server.
+    Get multiple predictions by making individual requests to the processing server.
     
     Args:
         instruction (str): The instruction for the robot
         image_path (str): Path to the input image
-        batch_size (int, optional): Size of the batch. Defaults to 4.
+        batch_size (int, optional): Number of predictions to get. Defaults to 4.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
     
     Returns:
@@ -144,26 +144,34 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
     
-    # Prepare the payload
+    # Prepare the base payload
     payload = {
         "instruction": instruction,
         "image_path": image_path,
-        "batch_size": batch_size,
+        "batch_size": 1,  # Always set to 1 for individual requests
         "temperature": temperature
     }
     
-    # Send request to server
-    response = requests.post(
-        "http://127.0.0.1:3200/batch",
-        data=json.dumps(payload),
-        headers={'Content-Type': 'application/json'}
-    )
+    all_output_ids = []
+    all_actions = []
     
-    if response.status_code != 200:
-        raise Exception(f"Error from server: {response.text}")
+    # Make batch_size number of individual requests
+    for _ in range(batch_size):
+        # Send request to server
+        response = requests.post(
+            "http://127.0.0.1:3200/batch",
+            data=json.dumps(payload),
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Error from server: {response.text}")
+        
+        response_data = json.loads(response.text)
+        all_output_ids.extend(response_data["output_ids"])
+        all_actions.extend(response_data["actions"])
     
-    response_data = json.loads(response.text)
-    return np.array(response_data["output_ids"]), np.array(response_data["actions"])
+    return np.array(all_output_ids), np.array(all_actions)
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -382,39 +390,21 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=16,
-        temperature=0.2
+        batch_size=8,
+        temperature=0.1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
-
-    # greedy_output_ids, greedy_actions = get_batch_actions(
-    #     instruction=instruction,
-    #     image_path=image_path,
-    #     batch_size=1,
-    #     temperature=0
-    # )
-    # greedy_output_ids, greedy_actions = preprocess_actions(greedy_output_ids, greedy_actions)
 
     print(output_ids)
 
     if len(output_ids)==1:
         return actions[0]
     
-    # combine n_samples + greedy
-    # output_ids = np.concatenate([output_ids, greedy_output_ids], axis=0)
-    # actions = np.concatenate([actions, greedy_actions], axis=0)
-    
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
     
     rewards = get_rewards(instruction, reward_img, output_ids)
-    
-    # selected_index = select_action_index(rewards, temperature=0.5)
     selected_index = np.argmax(rewards)
-    # print("ids: ", output_ids)
-    # print("continuous: ", actions)
-    # return action
-    # print("len: ", len(rewards))
-    # print("selected: ", selected_index)
+
     return actions[selected_index]
 
 
