@@ -69,7 +69,7 @@ def select_action_index(rewards, temperature=0.1):
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
-    output_ids = np.where(output_ids == 31775, 31774, output_ids)
+    output_ids = np.where(output_ids == 31745, 31744, output_ids)
     action = np.array(action)
     
     # Get the majority value for the last dimension of each row
