@@ -390,8 +390,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=8,
-        temperature=0.1
+        batch_size=50,
+        temperature=0.5
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
 
