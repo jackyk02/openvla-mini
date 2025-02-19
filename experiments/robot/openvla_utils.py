@@ -23,155 +23,46 @@ import json_numpy as json
 
 import numpy as np
 
-def select_action_index(rewards, temperature=0.1):
-    """
-    Select an action index based on rewards using a combination of top-k sampling rewards
-    and greedy action selection, with temperature-scaled softmax probabilities.
-    
-    Args:
-        rewards: numpy array of rewards where the last element is the greedy reward
-        temperature: temperature parameter for softmax (default: 0.1)
-                    Lower values make the distribution more peaked (more deterministic)
-    
-    Returns:
-        Selected action index in the original rewards array
-    """
-    # Convert rewards to numpy array if it isn't already
-    rewards = np.array(rewards)
-    
-    # Separate sampling rewards and greedy reward
-    sampling_rewards = rewards[:-1]
-    
-    # Get indices of top k sampling rewards (ensure integer type)
-    k = min(len(sampling_rewards), 2)  # Handle cases with fewer than 3 sampling rewards
-    top_k_indices = np.argsort(sampling_rewards)[-k:].astype(np.int64)
-    
-    # Combine top k indices with the greedy index (last index)
-    greedy_index = np.array([len(rewards) - 1], dtype=np.int64)
-    candidate_indices = np.concatenate([top_k_indices, greedy_index])
-    
-    # Get corresponding rewards for candidates
-    candidate_rewards = rewards[candidate_indices]
-    print(candidate_rewards)
-    
-    # Apply temperature-scaled softmax to get selection probabilities
-    scaled_rewards = candidate_rewards / temperature
-    exp_rewards = np.exp(scaled_rewards - np.max(scaled_rewards))  # subtract max for numerical stability
-    probabilities = exp_rewards / np.sum(exp_rewards)
-    print(probabilities)
-    
-    # Select index based on probabilities
-    selected_candidate_idx = np.random.choice(len(candidate_indices), p=probabilities)
-    selected_idx = int(candidate_indices[selected_candidate_idx])  # ensure integer output
-    
-    return selected_idx
 
-def preprocess_actions(output_ids, action):
-    # Convert arrays to numpy arrays if they aren't already
-    output_ids = np.array(output_ids)
-    output_ids = np.where(output_ids == 31745, 31744, output_ids)
-    action = np.array(action)
-    
-    # Get the majority value for the last dimension of each row
-    last_dim_values = output_ids[:, -1]
-    majority_value = np.bincount(last_dim_values).argmax()
-    
-    # Create a mask for rows where the last value matches the majority
-    majority_mask = (output_ids[:, -1] == majority_value)
-    
-    # Filter arrays to keep only rows with majority value in last dimension
-    output_ids = output_ids[majority_mask]
-    action = action[majority_mask]
-    
-    # Apply the original range filter
-    range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
-    output_ids = output_ids[range_mask]
-    action = action[range_mask]
-    
-    # Get unique rows and their indices
-    unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
-    
-    # Sort indices to maintain original order
-    indices = sorted(indices)
-    
-    # Return both arrays with only unique rows, maintaining alignment
-    return output_ids[indices], action[indices]
-
-def get_rewards(instruction, image_path, actions):
-    # Initialize rewards list
-    all_rewards = []
-    
-    # Process actions in batches of 4
-    batch_size = 4
-    num_batches = math.ceil(len(actions) / batch_size)
-    
-    for i in range(num_batches):
-        # Get the current batch of actions
-        start_idx = i * batch_size
-        end_idx = min((i + 1) * batch_size, len(actions))
-        action_batch = actions[start_idx:end_idx]
-        
-        # Prepare payload for the current batch
-        payload = {
-            "instruction": instruction,
-            "image_path": image_path,
-            "action": action_batch
-        }
-        
-        # Send request to server
-        response = requests.post("http://127.0.0.1:3100/process", data=json.dumps(payload))
-        response_data = json.loads(response.text)
-        
-        # Extend rewards list with batch results
-        all_rewards.extend(response_data["rewards"])
-    
-    return all_rewards
-
-def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
+def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0, policy = "octo"):
     """
     Get multiple predictions by making individual requests to the processing server.
-    
-    Args:
-        instruction (str): The instruction for the robot
-        image_path (str): Path to the input image
-        batch_size (int, optional): Number of predictions to get. Defaults to 4.
-        temperature (float, optional): Sampling temperature. Defaults to 1.0.
-    
     Returns:
         numpy.ndarray: Array of predicted actions
     """
+
+    # Policy to port mapping
+    POLICY_API = {
+        "cogact": 2100,
+        "octo": 2200,
+        "openvla": 2300,
+        "spatialvla": 2400
+    }
+    port = POLICY_API.get(policy)
+    api_url = f"http://localhost:{port}"
+
     # Verify image exists
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
     
     # Prepare the base payload
     payload = {
-        "instruction": instruction,
         "image_path": image_path,
-        "batch_size": 1,  # Always set to 1 for individual requests
-        "temperature": temperature
+        "instruction": instruction,
+        "num_samples": batch_size,
+        "temperature": temperature,
     }
+
+    response = requests.post(
+        f"{api_url}/batch",
+        json=payload,
+        headers={"Content-Type": "application/json"}
+    )
+
+    result = response.json()
     
-    all_output_ids = []
-    all_actions = []
+    return np.array(result['actions'])
     
-    # Make batch_size number of individual requests
-    for _ in range(batch_size):
-        # Send request to server
-        response = requests.post(
-            "http://127.0.0.1:3200/batch",
-            data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'}
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"Error from server: {response.text}")
-        
-        response_data = json.loads(response.text)
-        all_output_ids.extend(response_data["output_ids"])
-        all_actions.extend(response_data["actions"])
-    
-    return np.array(all_output_ids), np.array(all_actions)
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -385,27 +276,18 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     
     # Get action from SGLang
     instruction = task_label.lower()
-    image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
+    image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
+
     # print(instruction)
-    output_ids, actions = get_batch_actions(
+    actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=8,
-        temperature=0.1
+        batch_size=1,
+        temperature=0,
+        policy = "octo"
     )
-    output_ids, actions = preprocess_actions(output_ids, actions)
 
-    print(output_ids)
-
-    if len(output_ids)==1:
-        return actions[0]
-    
-    reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    
-    rewards = get_rewards(instruction, reward_img, output_ids)
-    selected_index = np.argmax(rewards)
-
-    return actions[selected_index]
+    return actions[0]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):

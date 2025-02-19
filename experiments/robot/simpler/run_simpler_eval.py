@@ -27,6 +27,7 @@ from typing import Optional, Union
 import draccus
 import numpy as np
 import tqdm
+import requests
 
 import wandb
 from experiments.robot.simpler.simpler_benchmark import get_benchmark
@@ -59,7 +60,8 @@ class GenerateConfig:
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    model_family: str = "openvla"                    # Model family
+    policy: str = "octo"
+    model_family: str = "openvla"                    # Dummy Model family
     hf_token: str = Path(".hf_token")                       # Model family
     pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
     load_in_8bit: bool = False                       # (For OpenVLA only) Load with 8-bit quantization
@@ -90,9 +92,34 @@ class GenerateConfig:
     wandb_entity: Optional[str] = None          # Name of entity to log under
 
     seed: int = 7                                    # Random Seed (for reproducibility)
+    reward: bool = False
 
     # fmt: on
 
+def reset_model(instruction: str, policy = "octo"):
+    if policy == "octo":
+        # Policy to port mapping
+        POLICY_API = {
+            "cogact": 2100,
+            "octo": 2200,
+            "openvla": 2300,
+            "spatialvla": 2400
+        }
+        port = POLICY_API.get(policy)
+        api_url = f"http://localhost:{port}"
+        
+        # Prepare the base payload
+        payload = {
+            "instruction": instruction,
+        }
+
+        response = requests.post(
+            f"{api_url}/reset",
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        )
+    
+    return None
 
 @draccus.wrap()
 def eval_simpler(cfg: GenerateConfig) -> None:
@@ -127,7 +154,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
     #     processor = get_processor(cfg)
 
     # Initialize local logging
-    run_id = f"{cfg.prefix}EVAL-{cfg.task_suite_name}-{cfg.model_family}-{DATE_TIME}"
+    run_id = f"{cfg.prefix}EVAL-{cfg.task_suite_name}-{cfg.policy}-{DATE_TIME}"
     if cfg.run_id_note is not None:
         run_id += f"--{cfg.run_id_note}"
     os.makedirs(cfg.local_log_dir, exist_ok=True)
@@ -201,6 +228,9 @@ def eval_simpler(cfg: GenerateConfig) -> None:
 
             print(f"Starting episode {task_episodes+1}...")
             log_file.write(f"Starting episode {task_episodes+1}...\n")
+            
+            reset_model(task_description, "octo")
+
             while t < max_steps + cfg.num_steps_wait:
                 # try:
                 # IMPORTANT: Do nothing for the first few timesteps because the simulator drops objects
