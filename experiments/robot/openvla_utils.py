@@ -23,6 +23,67 @@ import json_numpy as json
 
 import numpy as np
 
+def preprocess_actions(output_ids, action):
+    # Convert arrays to numpy arrays if they aren't already
+    output_ids = np.array(output_ids)
+    output_ids = np.where(output_ids == 31745, 31744, output_ids)
+    action = np.array(action)
+    
+    # Get the majority value for the last dimension of each row
+    last_dim_values = output_ids[:, -1]
+    majority_value = np.bincount(last_dim_values).argmax()
+    
+    # Create a mask for rows where the last value matches the majority
+    majority_mask = (output_ids[:, -1] == majority_value)
+    
+    # Filter arrays to keep only rows with majority value in last dimension
+    output_ids = output_ids[majority_mask]
+    action = action[majority_mask]
+    
+    # Apply the original range filter
+    range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
+    output_ids = output_ids[range_mask]
+    action = action[range_mask]
+    
+    # Get unique rows and their indices
+    unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
+    
+    # Sort indices to maintain original order
+    indices = sorted(indices)
+    
+    # Return both arrays with only unique rows, maintaining alignment
+    return output_ids[indices], action[indices]
+
+def get_rewards(instruction, image_path, actions):
+    # Initialize rewards list
+    all_rewards = []
+    
+    # Process actions in batches of 4
+    batch_size = 4
+    num_batches = math.ceil(len(actions) / batch_size)
+    
+    for i in range(num_batches):
+        # Get the current batch of actions
+        start_idx = i * batch_size
+        end_idx = min((i + 1) * batch_size, len(actions))
+        action_batch = actions[start_idx:end_idx]
+        
+        # Prepare payload for the current batch
+        payload = {
+            "instruction": instruction,
+            "image_path": image_path,
+            "action": action_batch
+        }
+        
+        # Send request to server
+        response = requests.post("http://127.0.0.1:3100/process", data=json.dumps(payload))
+        response_data = json.loads(response.text)
+        
+        # Extend rewards list with batch results
+        all_rewards.extend(response_data["rewards"])
+    
+    return all_rewards
+
 
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0, policy = "octo"):
     """
@@ -61,7 +122,7 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
 
     result = response.json()
     
-    return np.array(result['actions'])
+    return np.array(result['tokens']), np.array(result['actions'])
     
 
 # Initialize important constants and pretty-printing mode in NumPy.
@@ -279,15 +340,24 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
 
     # print(instruction)
-    actions = get_batch_actions(
+    output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=1,
-        temperature=0,
+        batch_size=8,
+        temperature=0.1,
         policy = "octo"
     )
+    output_ids, actions = preprocess_actions(output_ids, actions)
 
-    return actions[0]
+    print(output_ids)
+
+    if len(output_ids)==1:
+        return actions[0]
+        
+    rewards = get_rewards(instruction, image_path, output_ids)
+    selected_index = np.argmax(rewards)
+
+    return actions[selected_index]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
