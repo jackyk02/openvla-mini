@@ -337,24 +337,26 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     
     # Get action from SGLang
     instruction = task_label.lower()
-    image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
+    image_path = "/root/openvla-mini/transfer_images/original_img.jpg"
 
     # print(instruction)
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=8,
-        temperature=0.1,
+        batch_size=1,
+        temperature=0,
         policy = "octo"
     )
+    print(output_ids)
     output_ids, actions = preprocess_actions(output_ids, actions)
 
     print(output_ids)
 
     if len(output_ids)==1:
         return actions[0]
-        
-    rewards = get_rewards(instruction, image_path, output_ids)
+
+    reward_image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
+    rewards = get_rewards(instruction, reward_image_path, output_ids)
     selected_index = np.argmax(rewards)
 
     return actions[selected_index]

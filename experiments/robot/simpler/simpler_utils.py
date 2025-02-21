@@ -28,6 +28,10 @@ def get_simpler_img(env, obs, resize_size):
     """
     assert isinstance(resize_size, int)
     image = get_image_from_maniskill2_obs_dict(env, obs)
+    # save original image
+    import os
+    os.makedirs("/root/openvla-mini/transfer_images/", exist_ok=True)
+    Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/original_img.jpg")
     save_reward_img(image) 
 
     # Preprocess the image the exact same way that the Berkeley Bridge folks did it
