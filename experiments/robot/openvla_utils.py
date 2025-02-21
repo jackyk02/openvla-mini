@@ -26,6 +26,7 @@ import numpy as np
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
+    output_ids = np.where(output_ids == 31999, 31872, output_ids)
     output_ids = np.where(output_ids == 31745, 31744, output_ids)
     action = np.array(action)
     
@@ -349,8 +350,6 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     )
     print(output_ids)
     output_ids, actions = preprocess_actions(output_ids, actions)
-
-    print(output_ids)
 
     if len(output_ids)==1:
         return actions[0]
