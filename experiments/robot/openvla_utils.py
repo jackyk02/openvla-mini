@@ -338,13 +338,13 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     
     # Get action from SGLang
     instruction = task_label.lower()
-    image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
+    image_path = "/root/openvla-mini/transfer_images/original_img.jpg"
 
     # print(instruction)
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=3,
+        batch_size=1,
         temperature=0,
         policy = "cogact"
     )
