@@ -344,9 +344,9 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=1,
+        batch_size=4,
         temperature=0,
-        policy = "cogact"
+        policy = "spatialvla"
     )
 
     output_ids, actions = preprocess_actions(output_ids, actions)

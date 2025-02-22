@@ -60,7 +60,7 @@ class GenerateConfig:
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    policy: str = "cogact"
+    policy: str = "spatialvla"
     model_family: str = "openvla"                    # Dummy Model family
     hf_token: str = Path(".hf_token")                       # Model family
     pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
