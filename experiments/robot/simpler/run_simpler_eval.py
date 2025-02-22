@@ -60,7 +60,7 @@ class GenerateConfig:
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    policy: str = "octo"
+    policy: str = "cogact"
     model_family: str = "openvla"                    # Dummy Model family
     hf_token: str = Path(".hf_token")                       # Model family
     pretrained_checkpoint: Union[str, Path] = ""     # Pretrained checkpoint path
@@ -229,7 +229,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
             print(f"Starting episode {task_episodes+1}...")
             log_file.write(f"Starting episode {task_episodes+1}...\n")
             
-            reset_model(task_description, "octo")
+            reset_model(task_description, cfg.policy)
 
             while t < max_steps + cfg.num_steps_wait:
                 # try:
