@@ -338,7 +338,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     
     # Get action from SGLang
     instruction = task_label.lower()
-    image_path = "/root/openvla-mini/transfer_images/original_img.jpg"
+    image_path = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
 
     # print(instruction)
     output_ids, actions = get_batch_actions(
