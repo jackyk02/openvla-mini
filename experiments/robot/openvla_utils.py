@@ -23,6 +23,12 @@ import json_numpy as json
 
 import numpy as np
 
+from simpler_env.utils.action.action_ensemble import ActionEnsembler
+action_ensembler = ActionEnsembler(4, 0.0)
+
+def reset_ensembler():
+    action_ensembler.reset()
+
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
@@ -344,7 +350,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=1,
+        batch_size=3,
         temperature=0,
         policy = "octo"
     )
@@ -358,7 +364,11 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     rewards = get_rewards(instruction, reward_image_path, output_ids)
     selected_index = np.argmax(rewards)
 
-    return actions[selected_index]
+    print("Selected Action", actions[selected_index])
+    final_action = action_ensembler.ensemble_action(actions[selected_index])
+    print("Final Action", final_action)
+
+    return final_action
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):

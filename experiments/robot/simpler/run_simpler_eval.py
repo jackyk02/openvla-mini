@@ -43,7 +43,7 @@ sys.path.append("../..")
 from experiments.robot.openvla_utils import (
     save_rollout_video,
 )
-from experiments.robot.openvla_utils import get_processor
+from experiments.robot.openvla_utils import get_processor, reset_ensembler
 from experiments.robot.robot_utils import (
     DATE_TIME,
     get_action,
@@ -97,6 +97,9 @@ class GenerateConfig:
     # fmt: on
 
 def reset_model(instruction: str, policy = "octo"):
+    print("Reset ensembler")
+    reset_ensembler()
+    print("Reset model")
     if policy == "octo":
         # Policy to port mapping
         POLICY_API = {
