@@ -24,7 +24,9 @@ import json_numpy as json
 import numpy as np
 
 from simpler_env.utils.action.action_ensemble import ActionEnsembler
+from experiments.robot.token2action import TokenActionConverter 
 action_ensembler = ActionEnsembler(4, 0.0)
+converter = TokenActionConverter()
 
 def reset_ensembler():
     action_ensembler.reset()
@@ -347,28 +349,40 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     image_path = "/root/openvla-mini/transfer_images/original_img.jpg"
 
     # print(instruction)
+    POLICY  = "cogact"
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=3,
-        temperature=0,
-        policy = "octo"
+        batch_size=6,
+        temperature=1.0,
+        policy = POLICY
     )
     print(output_ids)
-    output_ids, actions = preprocess_actions(output_ids, actions)
-
-    if len(output_ids)==1:
-        return actions[0]
 
     reward_image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    rewards = get_rewards(instruction, reward_image_path, output_ids)
-    selected_index = np.argmax(rewards)
 
-    print("Selected Action", actions[selected_index])
-    final_action = action_ensembler.ensemble_action(actions[selected_index])
-    print("Final Action", final_action)
+    if POLICY in ["octo"]: # Policies with ensembling
+        ensembled_actions = []
+        ensembled_output_ids = []
+        for action in actions:
+            ensembled_actions.append(action_ensembler.fake_ensemble_action(action))
+            ensembled_output_ids.append(converter.action_to_token(ensembled_actions[-1]).tolist())
+        processed_output_ids, processed_actions = preprocess_actions(ensembled_output_ids, ensembled_actions)
+        rewards = get_rewards(instruction, reward_image_path, processed_output_ids)
+        selected_index = np.argmax(rewards)
+        # final_action = action_ensembler.ensemble_action(actions[selected_index])
+        # return final_action
+        action_ensembler.append_to_history(actions[selected_index])
+        return processed_actions[selected_index]
 
-    return final_action
+    else:
+        output_ids, actions = preprocess_actions(output_ids, actions)
+        if len(output_ids)==1:
+            return actions[0]
+        reward_image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
+        rewards = get_rewards(instruction, reward_image_path, output_ids)
+        selected_index = np.argmax(rewards)
+        return actions[selected_index]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):

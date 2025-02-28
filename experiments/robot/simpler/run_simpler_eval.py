@@ -232,7 +232,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
             print(f"Starting episode {task_episodes+1}...")
             log_file.write(f"Starting episode {task_episodes+1}...\n")
             
-            reset_model(task_description, "octo")
+            reset_model(task_description, "cogact")
 
             while t < max_steps + cfg.num_steps_wait:
                 # try:
