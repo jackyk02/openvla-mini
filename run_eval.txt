@@ -1,0 +1,24 @@
+cd bridge_data_robot
+./generate_usb_config.sh
+USB_CONNECTOR_CHART=$(pwd)/usb_connector_chart.yml docker compose up --build robonet
+
+cd bridge_data_robot
+docker compose exec robonet bash -lic "
+    pip install --upgrade pip &&
+    pip install moviepy &&
+    pip install numpy==1.22 &&
+    pip install -U scipy &&
+    widowx_env_service --server
+"
+
+
+cd openvla-mini
+export PRISMATIC_DATA_ROOT=.
+python experiments/robot/bridge/run_bridgev2_eval.py \
+  --model_family openvla \
+  --pretrained_checkpoint openvla/openvla-7b \
+  --load_in_4bit True
+  
+pip install bitsandbytes  
+pip install accelerate==0.21.0
+
