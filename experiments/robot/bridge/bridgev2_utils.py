@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 import torch
 from widowx_envs.widowx_env_service import WidowXClient, WidowXConfigs
+from PIL import Image
 
 sys.path.append(".")
 from experiments.robot.bridge.widowx_env import WidowXGym
@@ -114,10 +115,23 @@ def resize_image(img, resize_size):
     img = img.numpy()
     return img
 
+def save_reward_img(image):
+    image = tf.image.encode_jpeg(image)  # Encode as JPEG, as done in RLDS dataset builder
+    image = tf.io.decode_image(image, expand_animations=False, dtype=tf.uint8)  # Immediately decode back
+    image = tf.image.resize(
+        image, (256, 256), method="lanczos3", antialias=True
+    )
+    image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
+    image = image.numpy()
+    import os
+    os.makedirs("/home/jacky/Desktop/openvla-mini/transfer_images/", exist_ok=True)
+    Image.fromarray(image).save(f"/home/jacky/Desktop/openvla-mini/transfer_images/img256.jpg")
+
 
 def get_preprocessed_image(obs, resize_size):
     """Extracts image from observations and preprocesses it."""
     assert isinstance(resize_size, int) or isinstance(resize_size, tuple)
+    save_reward_img(obs["full_image"])
     if isinstance(resize_size, int):
         resize_size = (resize_size, resize_size)
     obs["full_image"] = resize_image(obs["full_image"], resize_size)

@@ -186,62 +186,131 @@ def apply_center_crop(im, t_h, t_w):
     crop_w = int((im.shape[-2] - t_w) / 2)
     return im[..., crop_h : crop_h + t_h, crop_w : crop_w + t_w, :]
 
+import requests
+import base64
+import os
+import argparse
+import time
+
+def send_image_to_server(server_url, image_path, instruction, number_samples=8, temperature=0.5):
+    """
+    Send an image and instruction to the server and get the best action.
+    
+    Args:
+        server_url (str): URL of the server endpoint
+        image_path (str): Path to the image file
+        instruction (str): The instruction for the image
+        number_samples (int): Number of samples to generate
+        temperature (float): Temperature for action generation
+        
+    Returns:
+        dict: Server response containing the best action
+    """
+    try:
+        # Check if the image exists
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+        
+        # Read and encode the image
+        with open(image_path, "rb") as img_file:
+            img_data = img_file.read()
+            img_base64 = base64.b64encode(img_data).decode('utf-8')
+        
+        # Prepare the request data
+        payload = {
+            "instruction": instruction,
+            "image": img_base64,
+            "number_samples": number_samples,
+            "temperature": temperature
+        }
+        
+        # Send the request to the server
+        response = requests.post(
+            server_url,
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Server returned status code {response.status_code}: {response.text}"}
+            
+    except Exception as e:
+        return {"error": str(e)}
+
 #
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
     """Generates an action with the VLA policy."""
+    server_url = "http://localhost:5000/process_image"
+    image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/img256.jpg"
+    instruction = task_label.lower()
+    number_samples = 1
+    temperature = 0
 
-    # only supports 1 image
-    if isinstance(obs["full_image"], list):
-        obs["full_image"] = obs["full_image"][0]
+    result = send_image_to_server(
+        server_url=server_url,
+        image_path=image_path,
+        instruction=instruction,
+        number_samples=number_samples,
+        temperature=temperature
+    )
+    best_action = np.array(result['best_action'])
+    return best_action
 
-    image = Image.fromarray(obs["full_image"])
-    image = image.convert("RGB")
+    # # only supports 1 image
+    # if isinstance(obs["full_image"], list):
+    #     obs["full_image"] = obs["full_image"][0]
 
-    # (If trained with image augmentations) Center crop image and then resize back up to original size.
-    # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
-    #            the original height and width by sqrt(0.9) -- not 0.9!
-    if center_crop:
-        batch_size = 1
-        crop_scale = 0.9
+    # image = Image.fromarray(obs["full_image"])
+    # image = image.convert("RGB")
 
-        # Convert to TF Tensor and record original data type (should be tf.uint8)
-        image = tf.convert_to_tensor(np.array(image))
-        orig_dtype = image.dtype
+    # # (If trained with image augmentations) Center crop image and then resize back up to original size.
+    # # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
+    # #            the original height and width by sqrt(0.9) -- not 0.9!
+    # if center_crop:
+    #     batch_size = 1
+    #     crop_scale = 0.9
 
-        # Convert to data type tf.float32 and values between [0,1]
-        image = tf.image.convert_image_dtype(image, tf.float32)
+    #     # Convert to TF Tensor and record original data type (should be tf.uint8)
+    #     image = tf.convert_to_tensor(np.array(image))
+    #     orig_dtype = image.dtype
 
-        # Crop and then resize back to original size
-        image = crop_and_resize(image, crop_scale, batch_size)
+    #     # Convert to data type tf.float32 and values between [0,1]
+    #     image = tf.image.convert_image_dtype(image, tf.float32)
 
-        # Convert back to original data type
-        image = tf.clip_by_value(image, 0, 1)
-        image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
+    #     # Crop and then resize back to original size
+    #     image = crop_and_resize(image, crop_scale, batch_size)
 
-        # Convert back to PIL Image
-        image = Image.fromarray(image.numpy())
-        image = image.convert("RGB")
+    #     # Convert back to original data type
+    #     image = tf.clip_by_value(image, 0, 1)
+    #     image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
 
-        # Save processed image and path for Inference
-        transfer_dir = f"./transfer_images/"
-        os.makedirs(transfer_dir, exist_ok=True)
-        image_path = f"{transfer_dir}/vla_processed_img.jpg"
-        image.save(image_path)
+    #     # Convert back to PIL Image
+    #     image = Image.fromarray(image.numpy())
+    #     image = image.convert("RGB")
 
-    # Build VLA prompt
-    if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
-        prompt = (
-            f"{OPENVLA_V01_SYSTEM_PROMPT} USER: What action should the robot take to {task_label.lower()}? ASSISTANT:"
-        )
-    else:  # OpenVLA
-        prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
+    #     # Save processed image and path for Inference
+    #     transfer_dir = f"./transfer_images/"
+    #     os.makedirs(transfer_dir, exist_ok=True)
+    #     image_path = f"{transfer_dir}/vla_processed_img.jpg"
+    #     image.save(image_path)
 
-    # Process inputs.
-    inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
+    # # Build VLA prompt
+    # if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
+    #     prompt = (
+    #         f"{OPENVLA_V01_SYSTEM_PROMPT} USER: What action should the robot take to {task_label.lower()}? ASSISTANT:"
+    #     )
+    # else:  # OpenVLA
+    #     prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
 
-    # Get action.
-    action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)
-    return action
+    # # Process inputs.
+    # inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
+
+    # # Get action.
+    # action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)
+    # return action
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
