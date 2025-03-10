@@ -21,7 +21,100 @@ from prismatic.models.load import load_vla
 import requests
 import json_numpy as json
 
+import pandas as pd
 import numpy as np
+from transformers import AutoConfig
+
+
+class TokenActionConverter:
+    def __init__(self, n_action_bins: int = 256, unnorm_key: str = "bridge_orig"):
+        self.bins = np.linspace(-1, 1, n_action_bins)
+        self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
+        self.vocab_size = 32000
+        self.unnorm_key = unnorm_key
+        self.config = AutoConfig.from_pretrained(
+            "openvla/openvla-7b", trust_remote_code=True
+        ).to_dict()
+        self.norm_stats = self.config["norm_stats"]
+        assert unnorm_key is not None
+        if unnorm_key not in self.norm_stats:
+            raise ValueError(
+                f"The `unnorm_key` you chose ({unnorm_key = }) is not in the available statistics. "
+                f"Please choose from: {self.norm_stats.keys()}"
+            )
+
+    def token_to_action(self, output_ids):
+        """
+        Convert token IDs to actions.
+
+        Args:
+            output_ids (list or np.ndarray): Token IDs to convert
+
+        Returns:
+            np.ndarray: The corresponding actions
+        """
+        predicted_action_token_ids = np.array(output_ids)
+        discretized_actions = self.vocab_size - predicted_action_token_ids
+        discretized_actions = np.clip(
+            discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1
+        )
+        normalized_actions = self.bin_centers[discretized_actions]
+
+        # Unnormalize actions
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+        actions = np.where(
+            mask,
+            0.5 * (normalized_actions + 1) *
+            (action_high - action_low) + action_low,
+            normalized_actions,
+        )
+        return actions
+
+    def action_to_token(self, actions):
+        """
+        Convert actions back to token IDs.
+
+        Args:
+            actions (np.ndarray): The actions to convert
+
+        Returns:
+            np.ndarray: The corresponding token IDs
+        """
+        # First, normalize the actions back to [-1, 1] range
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+
+        # Reverse the unnormalization
+        normalized_actions = np.where(
+            mask,
+            2 * (actions - action_low) / (action_high - action_low) - 1,
+            actions
+        )
+
+        # Find the closest bin centers to the normalized actions
+        discretized_actions = np.array([
+            np.abs(self.bin_centers - val).argmin()
+            for val in normalized_actions
+        ])
+
+        # Convert back to token ids
+        output_ids = self.vocab_size - discretized_actions - 1
+        output_ids = np.where(output_ids == 31745, 31744, output_ids)
+
+
+        return output_ids
+
 
 def select_action_index(rewards, temperature=0.1):
     """
@@ -127,14 +220,60 @@ def get_rewards(instruction, image_path, actions):
     
     return all_rewards
 
+# def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
+#     """
+#     Get multiple predictions by making individual requests to the processing server.
+    
+#     Args:
+#         instruction (str): The instruction for the robot
+#         image_path (str): Path to the input image
+#         batch_size (int, optional): Number of predictions to get. Defaults to 4.
+#         temperature (float, optional): Sampling temperature. Defaults to 1.0.
+    
+#     Returns:
+#         numpy.ndarray: Array of predicted actions
+#     """
+#     # Verify image exists
+#     if not os.path.exists(image_path):
+#         raise FileNotFoundError(f"Image not found at {image_path}")
+    
+#     # Prepare the base payload
+#     payload = {
+#         "instruction": instruction,
+#         "image_path": image_path,
+#         "batch_size": 1,  # Always set to 1 for individual requests
+#         "temperature": temperature
+#     }
+    
+#     all_output_ids = []
+#     all_actions = []
+    
+#     # Make batch_size number of individual requests
+#     for _ in range(batch_size):
+#         # Send request to server
+#         response = requests.post(
+#             "http://127.0.0.1:3200/batch",
+#             data=json.dumps(payload),
+#             headers={'Content-Type': 'application/json'}
+#         )
+        
+#         if response.status_code != 200:
+#             raise Exception(f"Error from server: {response.text}")
+        
+#         response_data = json.loads(response.text)
+#         all_output_ids.extend(response_data["output_ids"])
+#         all_actions.extend(response_data["actions"])
+    
+#     return np.array(all_output_ids), np.array(all_actions)
+
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
-    Get multiple predictions by making individual requests to the processing server.
+    Get batch predictions from the batch processing server.
     
     Args:
         instruction (str): The instruction for the robot
         image_path (str): Path to the input image
-        batch_size (int, optional): Number of predictions to get. Defaults to 4.
+        batch_size (int, optional): Size of the batch. Defaults to 4.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
     
     Returns:
@@ -144,34 +283,26 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
     
-    # Prepare the base payload
+    # Prepare the payload
     payload = {
         "instruction": instruction,
         "image_path": image_path,
-        "batch_size": 1,  # Always set to 1 for individual requests
+        "batch_size": batch_size,
         "temperature": temperature
     }
     
-    all_output_ids = []
-    all_actions = []
+    # Send request to server
+    response = requests.post(
+        "http://127.0.0.1:3200/batch",
+        data=json.dumps(payload),
+        headers={'Content-Type': 'application/json'}
+    )
     
-    # Make batch_size number of individual requests
-    for _ in range(batch_size):
-        # Send request to server
-        response = requests.post(
-            "http://127.0.0.1:3200/batch",
-            data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'}
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"Error from server: {response.text}")
-        
-        response_data = json.loads(response.text)
-        all_output_ids.extend(response_data["output_ids"])
-        all_actions.extend(response_data["actions"])
+    if response.status_code != 200:
+        raise Exception(f"Error from server: {response.text}")
     
-    return np.array(all_output_ids), np.array(all_actions)
+    response_data = json.loads(response.text)
+    return np.array(response_data["output_ids"]), np.array(response_data["actions"])
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -390,8 +521,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=8,
-        temperature=0.1
+        batch_size=50,
+        temperature=0.5
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
 
@@ -403,9 +534,102 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
     
     rewards = get_rewards(instruction, reward_img, output_ids)
-    selected_index = np.argmax(rewards)
 
-    return actions[selected_index]
+    # Replace the action selection after getting rewards:
+    # Instead of: selected_index = np.argmax(rewards)
+    # We'll use a more sophisticated selection strategy
+
+    # First, create a DataFrame with the necessary columns for our search tool
+
+    # Create a DataFrame to work with CSVSearchTool methods
+    df = pd.DataFrame({
+        'tokenized_action1': [str(ids) for ids in output_ids],
+        'action1': [str(action) for action in actions],
+        'action0': [str(actions[0])] * len(actions),  # Using first action as reference/ground truth
+        'rewards': rewards,
+        'index': 0,  # Same index for all rows as they're from the same batch
+    })
+
+    # Define a modified version of CSVSearchTool that can work with our in-memory DataFrame
+    # instead of requiring a file path
+    class ModifiedCSVSearchTool:
+        def __init__(self, dataframe):
+            self.df = dataframe
+            self.converter = TokenActionConverter()
+        
+        # Import the methods we need from the original class
+        def create_subgroup(self, index_value):
+            return self.df[self.df['index'] == index_value]
+        
+        def best_of_n_search(self, subgroup_df, n=1):
+            return subgroup_df.nlargest(n, 'rewards')
+        
+        def kmean_highest_reward_cluster(self, subgroup_df, n_clusters=4):
+            """Performs KMeans clustering and returns the cluster with the highest average reward."""
+            n_samples = len(subgroup_df)
+            actual_n_clusters = min(n_clusters, n_samples)
+            if actual_n_clusters <= 1:
+                return subgroup_df
+
+            # Parse the action strings into numpy arrays
+            features = np.vstack([np.fromstring(x[1:-1], sep=' ') for x in subgroup_df['action1'].values])
+            
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=actual_n_clusters, random_state=42).fit(features)
+            subgroup_df = subgroup_df.copy()  # Create a copy to avoid SettingWithCopyWarning
+            subgroup_df['cluster'] = kmeans.labels_
+
+            cluster_rewards = subgroup_df.groupby('cluster')['rewards'].mean()
+            best_cluster = cluster_rewards.idxmax()
+
+            return subgroup_df[subgroup_df['cluster'] == best_cluster]
+        
+        def majority_voting_all_dimensions(self, subgroup_df):
+            """Majority voting with reward-based tiebreaking."""
+            # Parse the tokenized action strings into numpy arrays
+            output_ids = np.vstack([np.fromstring(x[1:-1], sep=' ') for x in subgroup_df['tokenized_action1'].values]).astype(int)
+            
+            majority_values = []
+            for dim in range(output_ids.shape[1]):
+                values, counts = np.unique(output_ids[:, dim], return_counts=True)
+                tied_values = values[counts == counts.max()]
+                if len(tied_values) == 1:
+                    majority_values.append(tied_values[0])
+                else:
+                    # For ties, pick the value with highest reward
+                    reward_dict = {}
+                    for val in tied_values:
+                        mask = output_ids[:, dim] == val
+                        if any(mask):
+                            reward_dict[val] = subgroup_df.loc[mask, 'rewards'].max()
+                    majority_values.append(max(reward_dict, key=reward_dict.get))
+
+            # Get the corresponding action from the tokens
+            action = self.converter.token_to_action(np.array(majority_values))
+            return action
+
+    # Create the modified tool
+    tool = ModifiedCSVSearchTool(df)
+
+    # Create a subgroup - in this case it's the entire DataFrame since all rows have index=0
+    subgroup = tool.create_subgroup(0)
+
+    # Apply the sequence of operations as requested:
+    # 1. KMean clustering to group similar actions
+    clustered_df = tool.kmean_highest_reward_cluster(subgroup)
+
+    # 2. Take the top 3 actions by reward from the best cluster
+    top_actions = tool.best_of_n_search(clustered_df, 3)
+
+    # 3. Apply majority voting across all dimensions to get the final action
+    final_action = tool.majority_voting_all_dimensions(top_actions)
+
+    print(f"Selected action using advanced selection strategy: {final_action}")
+    return final_action
+
+    # selected_index = np.argmax(rewards)
+
+    # return actions[selected_index]
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
