@@ -241,7 +241,7 @@ def send_image_to_server(server_url, image_path, instruction, number_samples=8, 
         return {"error": str(e)}
 
 #
-def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, cfg):
+def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, cfg, center_crop=False):
     """Generates an action with the VLA policy."""
 
     # only supports 1 image

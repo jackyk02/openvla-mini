@@ -87,7 +87,7 @@ def get_action(cfg, model, obs, task_label, processor=None):
         assert action.shape == (ACTION_DIM,)
     elif cfg.model_family == "openvla":
         action = get_vla_action(
-            model, processor, cfg.pretrained_checkpoint, obs, task_label, cfg.unnorm_key, center_crop=cfg.center_crop, cfg
+            model, processor, cfg.pretrained_checkpoint, obs, task_label, cfg.unnorm_key, cfg, center_crop=cfg.center_crop
         )
         assert action.shape == (ACTION_DIM,)
     else:
