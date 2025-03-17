@@ -241,7 +241,7 @@ def send_image_to_server(server_url, image_path, instruction, number_samples=8, 
         return {"error": str(e)}
 
 #
-def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
+def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, cfg):
     """Generates an action with the VLA policy."""
 
     # only supports 1 image
@@ -285,8 +285,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     server_url = "http://localhost:5000/process_image"
     image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/vla_processed_img.jpg"
     instruction = task_label.lower()
-    number_samples = 1
-    temperature = 0
+    number_samples = cfg.batch_size
+    temperature = cfg.temperature
 
     result = send_image_to_server(
         server_url=server_url,

@@ -65,10 +65,10 @@ def get_next_task_label(task_label):
     return task_label
 
 
-def save_rollout_video(rollout_images, idx):
+def save_rollout_video(rollout_images, idx, batch_size, temperature):
     """Saves an MP4 replay of an episode."""
     os.makedirs("./rollouts", exist_ok=True)
-    mp4_path = f"./rollouts/rollout-{DATE_TIME}-{idx+1}.mp4"
+    mp4_path = f"./rollouts/rollout-{DATE_TIME}-{idx+1}-b{batch_size}-t{temperature}.mp4"
     video_writer = imageio.get_writer(mp4_path, fps=5)
     for img in rollout_images:
         video_writer.append_data(img)
