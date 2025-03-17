@@ -243,8 +243,47 @@ def send_image_to_server(server_url, image_path, instruction, number_samples=8, 
 #
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
     """Generates an action with the VLA policy."""
+
+    # only supports 1 image
+    if isinstance(obs["full_image"], list):
+        obs["full_image"] = obs["full_image"][0]
+
+    image = Image.fromarray(obs["full_image"])
+    image = image.convert("RGB")
+
+    # (If trained with image augmentations) Center crop image and then resize back up to original size.
+    # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
+    #            the original height and width by sqrt(0.9) -- not 0.9!
+    if center_crop:
+        batch_size = 1
+        crop_scale = 0.9
+
+        # Convert to TF Tensor and record original data type (should be tf.uint8)
+        image = tf.convert_to_tensor(np.array(image))
+        orig_dtype = image.dtype
+
+        # Convert to data type tf.float32 and values between [0,1]
+        image = tf.image.convert_image_dtype(image, tf.float32)
+
+        # Crop and then resize back to original size
+        image = crop_and_resize(image, crop_scale, batch_size)
+
+        # Convert back to original data type
+        image = tf.clip_by_value(image, 0, 1)
+        image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
+
+        # Convert back to PIL Image
+        image = Image.fromarray(image.numpy())
+        image = image.convert("RGB")
+
+        # Save processed image and path for Inference
+        transfer_dir = f"./transfer_images/"
+        os.makedirs(transfer_dir, exist_ok=True)
+        image_path = f"{transfer_dir}/vla_processed_img.jpg"
+        image.save(image_path)
+    
     server_url = "http://localhost:5000/process_image"
-    image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/img256.jpg"
+    image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/vla_processed_img.jpg"
     instruction = task_label.lower()
     number_samples = 1
     temperature = 0
@@ -258,44 +297,6 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     )
     best_action = np.array(result['best_action'])
     return best_action
-
-    # # only supports 1 image
-    # if isinstance(obs["full_image"], list):
-    #     obs["full_image"] = obs["full_image"][0]
-
-    # image = Image.fromarray(obs["full_image"])
-    # image = image.convert("RGB")
-
-    # # (If trained with image augmentations) Center crop image and then resize back up to original size.
-    # # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
-    # #            the original height and width by sqrt(0.9) -- not 0.9!
-    # if center_crop:
-    #     batch_size = 1
-    #     crop_scale = 0.9
-
-    #     # Convert to TF Tensor and record original data type (should be tf.uint8)
-    #     image = tf.convert_to_tensor(np.array(image))
-    #     orig_dtype = image.dtype
-
-    #     # Convert to data type tf.float32 and values between [0,1]
-    #     image = tf.image.convert_image_dtype(image, tf.float32)
-
-    #     # Crop and then resize back to original size
-    #     image = crop_and_resize(image, crop_scale, batch_size)
-
-    #     # Convert back to original data type
-    #     image = tf.clip_by_value(image, 0, 1)
-    #     image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
-
-    #     # Convert back to PIL Image
-    #     image = Image.fromarray(image.numpy())
-    #     image = image.convert("RGB")
-
-    #     # Save processed image and path for Inference
-    #     transfer_dir = f"./transfer_images/"
-    #     os.makedirs(transfer_dir, exist_ok=True)
-    #     image_path = f"{transfer_dir}/vla_processed_img.jpg"
-    #     image.save(image_path)
 
     # # Build VLA prompt
     # if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
