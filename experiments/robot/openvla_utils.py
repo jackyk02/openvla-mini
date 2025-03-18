@@ -195,7 +195,7 @@ def get_rewards(instruction, image_path, actions):
     all_rewards = []
     
     # Process actions in batches of 4
-    batch_size = 4
+    batch_size = 2
     num_batches = math.ceil(len(actions) / batch_size)
     
     for i in range(num_batches):
