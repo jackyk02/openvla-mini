@@ -531,7 +531,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     if len(output_ids)==1:
         return actions[0]
     
-    reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
+    reward_img = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
     
     rewards = get_rewards(instruction, reward_img, output_ids)
 
