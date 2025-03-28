@@ -18,6 +18,15 @@ from prismatic.extern.hf.modeling_prismatic import OpenVLAForActionPrediction
 from prismatic.extern.hf.processing_prismatic import PrismaticImageProcessor, PrismaticProcessor
 from prismatic.models.load import load_vla
 
+from experiments.robot.adaptive_ensemble import AdaptiveEnsembler
+action_ensembler = AdaptiveEnsembler(7, 0.1) # Default for CogACT in widowx
+
+def reset_ensembler():
+    action_ensembler.reset()
+
+from experiments.robot.token2action import TokenActionConverter 
+converter = TokenActionConverter()
+
 import requests
 import json_numpy as json
 
@@ -344,8 +353,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=1,
-        temperature=0,
+        batch_size=3,
+        temperature=1,
         policy = "cogact"
     )
 
@@ -356,10 +365,18 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         return actions[0]
 
     reward_image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    rewards = get_rewards(instruction, reward_image_path, output_ids)
-    selected_index = np.argmax(rewards)
 
-    return actions[selected_index]
+    ensembled_actions = []
+    ensembled_output_ids = []
+    for action in actions:
+        ensembled_actions.append(action_ensembler.fake_ensemble_action(action))
+        ensembled_output_ids.append(converter.action_to_token(ensembled_actions[-1]).tolist())
+    processed_output_ids, processed_actions = preprocess_actions(ensembled_output_ids, ensembled_actions)
+    rewards = get_rewards(instruction, reward_image_path, processed_output_ids)
+    selected_index = np.argmax(rewards)
+    action_ensembler.append_to_history(actions[selected_index])
+    return processed_actions[selected_index]
+
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
