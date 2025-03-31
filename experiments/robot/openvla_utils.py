@@ -31,6 +31,33 @@ import requests
 import json_numpy as json
 
 import numpy as np
+from transforms3d.euler import euler2axangle
+
+def process_action(action):
+    """ CogACT Specific Processing"""
+    raw_action = {
+        "world_vector": np.array(action[:3]),
+        "rotation_delta": np.array(action[3:6]),
+        "open_gripper": np.array(action[6:7]),  # range [0, 1]; 1 = open; 0 = close
+    }
+
+    # process raw_action to obtain the action to be sent to the maniskill2 environment
+    action = {}
+    action_scale = 1.0
+    action["world_vector"] = raw_action["world_vector"] * action_scale
+    action_rotation_delta = np.asarray(raw_action["rotation_delta"], dtype=np.float64)
+
+    roll, pitch, yaw = action_rotation_delta
+    axes, angles = euler2axangle(roll, pitch, yaw)
+    action_rotation_axangle = axes * angles
+    action["rot_axangle"] = action_rotation_axangle * action_scale
+    action["gripper"] = 2.0 * (raw_action["open_gripper"] > 0.5) - 1.0
+    action_array = np.concatenate([
+        action['world_vector'],
+        action['rot_axangle'],
+        action['gripper']
+    ])
+    return action_array
 
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
@@ -358,18 +385,16 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         policy = "cogact"
     )
 
-    output_ids, actions = preprocess_actions(output_ids, actions)
-    print(output_ids)
-
+    final_action = action_ensembler.ensemble_action(actions[0])
     if len(output_ids)==1:
-        return actions[0]
+        return process_action(final_action)
 
     reward_image_path = "/root/openvla-mini/transfer_images/reward_img.jpg"
 
     ensembled_actions = []
     ensembled_output_ids = []
     for action in actions:
-        ensembled_actions.append(action_ensembler.fake_ensemble_action(action))
+        ensembled_actions.append( process_action( action_ensembler.fake_ensemble_action(action) ) )
         ensembled_output_ids.append(converter.action_to_token(ensembled_actions[-1]).tolist())
     processed_output_ids, processed_actions = preprocess_actions(ensembled_output_ids, ensembled_actions)
     rewards = get_rewards(instruction, reward_image_path, processed_output_ids)
