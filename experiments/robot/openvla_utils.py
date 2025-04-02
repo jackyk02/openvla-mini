@@ -22,6 +22,98 @@ import requests
 import json_numpy as json
 
 import numpy as np
+import numpy as np
+from transformers import AutoConfig
+
+
+class TokenActionConverter:
+    def __init__(self, n_action_bins: int = 256, unnorm_key: str = "bridge_orig"):
+        self.bins = np.linspace(-1, 1, n_action_bins)
+        self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
+        self.vocab_size = 32000
+        self.unnorm_key = unnorm_key
+        self.config = AutoConfig.from_pretrained(
+            "openvla/openvla-7b", trust_remote_code=True
+        ).to_dict()
+        self.norm_stats = self.config["norm_stats"]
+        assert unnorm_key is not None
+        if unnorm_key not in self.norm_stats:
+            raise ValueError(
+                f"The `unnorm_key` you chose ({unnorm_key = }) is not in the available statistics. "
+                f"Please choose from: {self.norm_stats.keys()}"
+            )
+
+    def token_to_action(self, output_ids):
+        """
+        Convert token IDs to actions.
+
+        Args:
+            output_ids (list or np.ndarray): Token IDs to convert
+
+        Returns:
+            np.ndarray: The corresponding actions
+        """
+        predicted_action_token_ids = np.array(output_ids)
+        discretized_actions = self.vocab_size - predicted_action_token_ids
+        discretized_actions = np.clip(
+            discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1
+        )
+        normalized_actions = self.bin_centers[discretized_actions]
+
+        # Unnormalize actions
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+        actions = np.where(
+            mask,
+            0.5 * (normalized_actions + 1) *
+            (action_high - action_low) + action_low,
+            normalized_actions,
+        )
+        return actions
+
+    def action_to_token(self, actions):
+        """
+        Convert actions back to token IDs.
+
+        Args:
+            actions (np.ndarray): The actions to convert
+
+        Returns:
+            np.ndarray: The corresponding token IDs
+        """
+        # First, normalize the actions back to [-1, 1] range
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+
+        # Reverse the unnormalization
+        normalized_actions = np.where(
+            mask,
+            2 * (actions - action_low) / (action_high - action_low) - 1,
+            actions
+        )
+
+        # Find the closest bin centers to the normalized actions
+        discretized_actions = np.array([
+            np.abs(self.bin_centers - val).argmin()
+            for val in normalized_actions
+        ])
+
+        # Convert back to token ids
+        output_ids = self.vocab_size - discretized_actions - 1
+        output_ids = np.array(output_ids)
+        output_ids = np.where(output_ids == 31745, 31744, output_ids)
+
+        return output_ids
 
 def select_action_index(rewards, temperature=0.1):
     """
@@ -72,21 +164,17 @@ def preprocess_actions(output_ids, action):
     output_ids = np.where(output_ids == 31745, 31744, output_ids)
     action = np.array(action)
     
-    # Get the majority value for the last dimension of each row
-    last_dim_values = output_ids[:, -1]
-    majority_value = np.bincount(last_dim_values).argmax()
-    
-    # Create a mask for rows where the last value matches the majority
-    majority_mask = (output_ids[:, -1] == majority_value)
-    
-    # Filter arrays to keep only rows with majority value in last dimension
-    output_ids = output_ids[majority_mask]
-    action = action[majority_mask]
-    
     # Apply the original range filter
     range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
     output_ids = output_ids[range_mask]
     action = action[range_mask]
+    
+    return output_ids, action
+
+def get_unique_actions(output_ids, action):
+    # Convert arrays to numpy arrays if they aren't already
+    output_ids = np.array(output_ids)
+    action = np.array(action)
     
     # Get unique rows and their indices
     unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
@@ -210,6 +298,69 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
 #         all_actions.extend(response_data["actions"])
     
 #     return np.array(all_output_ids), np.array(all_actions)
+
+def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
+    """
+    Generate augmented samples based on the mean and variance of a batch of actions.
+    
+    Args:
+        batch_actions: NumPy array of shape (batch_size, 7) containing a batch of actions.
+        num_samples: Number of augmented samples to generate.
+        
+    Returns:
+        NumPy array of shape (num_samples, 7) containing augmented samples.
+    """
+    print(f"\nCalculating mean and variance from batch of {len(batch_actions)} actions...")
+    
+    # Calculate mean and variance for each dimension
+    mean_values = np.mean(batch_actions, axis=0)
+    var_values = np.var(batch_actions, axis=0)
+    
+    print("Mean values per dimension:", mean_values)
+    print("Variance values per dimension:", var_values)
+    
+    # Define valid ranges for the action dimensions
+    min_values = np.array([-0.02872725307941437,
+                         -0.04170349963009357,
+                         -0.026093858778476715,
+                         -0.08092105075716972,
+                         -0.09288699507713317,
+                         -0.20718276381492615,
+                         0.0])
+    max_values = np.array([0.028309678435325586,
+                         0.040855254605412394,
+                         0.040161586627364146,
+                         0.08192047759890528,
+                         0.07792850524187081,
+                         0.20382574498653397,
+                         1.0])
+    converter = TokenActionConverter()
+    
+    # Initialize output array to hold augmented samples
+    augmented_array = np.zeros((num_samples, 7))
+    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)    
+    
+    # Generate num_samples augmented samples
+    for i in range(num_samples):
+        # Generate values using the calculated mean and variance
+        # For dimensions 0-5 (continuous values)
+        augmented_action = np.random.normal(mean_values, np.sqrt(var_values), size=7)
+        
+        # For the 7th dimension (binary), use probability based on mean
+        p_gripper = mean_values[-1]  # Probability of gripper being 1
+        augmented_action[-1] = 1.0 if mean_values[-1] >= 0.5 else 0.0
+        
+        # Clamp values to valid range for first six dimensions
+        augmented_action[:-1] = np.clip(augmented_action[:-1], min_values[:-1], max_values[:-1])
+        
+        # Store the augmented action
+        augmented_array[i] = augmented_action
+        augmented_ids[i] = converter.action_to_token(augmented_action)
+    
+    print(f"Generated {num_samples} augmented samples based on batch statistics")
+    
+    return augmented_ids, augmented_array
+
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -428,18 +579,23 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=32,
+        batch_size=10,
         temperature=1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
-
-    print(output_ids)
-
     if len(output_ids)==1:
         return actions[0]
+
+    output_ids, actions = generate_augmented_samples_from_batch(
+        batch_actions=actions,
+        num_samples=50
+    )
+
+    output_ids, actions = get_unique_actions(output_ids, actions)
     
+    print(output_ids)
+
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    
     rewards = get_rewards(instruction, reward_img, output_ids)
     selected_index = np.argmax(rewards)
 
