@@ -199,7 +199,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
 
         # Initialize LIBERO environment and task description
         env = get_simpler_env(task, cfg.model_family)
-        task_description = env.get_language_instruction()
+        task_description = env.unwrapped.get_language_instruction()
 
         # Start episodes
         task_episodes, task_successes = 0, 0
@@ -232,7 +232,7 @@ def eval_simpler(cfg: GenerateConfig) -> None:
             print(f"Starting episode {task_episodes+1}...")
             log_file.write(f"Starting episode {task_episodes+1}...\n")
             
-            reset_model(task_description, "cogact")
+            reset_model(task_description, "spatialvla")
 
             while t < max_steps + cfg.num_steps_wait:
                 # try:
