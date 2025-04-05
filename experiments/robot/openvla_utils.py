@@ -579,7 +579,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=9,
+        batch_size=5,
         temperature=1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
@@ -588,7 +588,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
 
     output_ids, actions = generate_augmented_samples_from_batch(
         batch_actions=actions,
-        num_samples=64
+        num_samples=32
     )
 
     output_ids, actions = get_unique_actions(output_ids, actions)
