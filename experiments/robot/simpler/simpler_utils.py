@@ -116,32 +116,12 @@ def save_reward_img(image):
     # raw_to_tf
     image = tf.image.encode_jpeg(image)  # Encode as JPEG, as done in RLDS dataset builder
     image = tf.io.decode_image(image, expand_animations=False, dtype=tf.uint8)  # Immediately decode back
-    image = tf.image.resize(
-        image, (256, 256), method="lanczos3", antialias=True
-    )
-    image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
-    image = tf.io.encode_jpeg(image, quality=95)
-
-    # susie
-    image = tf.io.decode_image(image, expand_animations=False, dtype=tf.uint8)  # Immediately decode back
-    image = tf.image.resize(
-        image, (256, 256), method="lanczos3", antialias=True
-    )
     image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
     image = image.numpy()
 
     import os
     os.makedirs("/root/openvla-mini/transfer_images/", exist_ok=True)
     Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/reward_img.jpg")
-
-    # resize down to 224x224
-    process_image(
-        "/root/openvla-mini/transfer_images/reward_img.jpg",
-        output_dir="./output/",
-        crop_scale=0.9,
-        target_size=(224, 224),
-        batch_size=1
-    )
 
 def get_simpler_img(env, obs, resize_size):
     """

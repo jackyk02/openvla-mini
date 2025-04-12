@@ -190,7 +190,7 @@ def get_rewards(instruction, image_path, actions):
     all_rewards = []
     
     # Process actions in batches of 4
-    batch_size = 2
+    batch_size = 32
     num_batches = math.ceil(len(actions) / batch_size)
     
     for i in range(num_batches):
@@ -596,7 +596,10 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     print(output_ids)
 
     reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
-    rewards = get_rewards(instruction, reward_img, output_ids)
+
+    if len(actions)==1:
+        return actions[0]
+    rewards = get_rewards(instruction, reward_img, actions)
     selected_index = np.argmax(rewards)
 
     return actions[selected_index]
