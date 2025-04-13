@@ -583,8 +583,11 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
         temperature=1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
-    if len(output_ids)==1:
-        return actions[0]
+    
+    # if only one action, return the first action
+    _, unique = get_unique_actions(output_ids, actions)
+    if len(unique)==1:
+        return unique[0]
 
     output_ids, actions = generate_augmented_samples_from_batch(
         batch_actions=actions,
