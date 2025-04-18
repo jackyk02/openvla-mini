@@ -22,6 +22,98 @@ import requests
 import json_numpy as json
 
 import numpy as np
+import numpy as np
+from transformers import AutoConfig
+
+
+class TokenActionConverter:
+    def __init__(self, n_action_bins: int = 256, unnorm_key: str = "bridge_orig"):
+        self.bins = np.linspace(-1, 1, n_action_bins)
+        self.bin_centers = (self.bins[:-1] + self.bins[1:]) / 2.0
+        self.vocab_size = 32000
+        self.unnorm_key = unnorm_key
+        self.config = AutoConfig.from_pretrained(
+            "openvla/openvla-7b", trust_remote_code=True
+        ).to_dict()
+        self.norm_stats = self.config["norm_stats"]
+        assert unnorm_key is not None
+        if unnorm_key not in self.norm_stats:
+            raise ValueError(
+                f"The `unnorm_key` you chose ({unnorm_key = }) is not in the available statistics. "
+                f"Please choose from: {self.norm_stats.keys()}"
+            )
+
+    def token_to_action(self, output_ids):
+        """
+        Convert token IDs to actions.
+
+        Args:
+            output_ids (list or np.ndarray): Token IDs to convert
+
+        Returns:
+            np.ndarray: The corresponding actions
+        """
+        predicted_action_token_ids = np.array(output_ids)
+        discretized_actions = self.vocab_size - predicted_action_token_ids
+        discretized_actions = np.clip(
+            discretized_actions - 1, a_min=0, a_max=self.bin_centers.shape[0] - 1
+        )
+        normalized_actions = self.bin_centers[discretized_actions]
+
+        # Unnormalize actions
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+        actions = np.where(
+            mask,
+            0.5 * (normalized_actions + 1) *
+            (action_high - action_low) + action_low,
+            normalized_actions,
+        )
+        return actions
+
+    def action_to_token(self, actions):
+        """
+        Convert actions back to token IDs.
+
+        Args:
+            actions (np.ndarray): The actions to convert
+
+        Returns:
+            np.ndarray: The corresponding token IDs
+        """
+        # First, normalize the actions back to [-1, 1] range
+        action_norm_stats = self.norm_stats[self.unnorm_key]["action"]
+        mask = action_norm_stats.get(
+            "mask", np.ones_like(action_norm_stats["q01"], dtype=bool)
+        )
+        action_high, action_low = np.array(action_norm_stats["q99"]), np.array(
+            action_norm_stats["q01"]
+        )
+
+        # Reverse the unnormalization
+        normalized_actions = np.where(
+            mask,
+            2 * (actions - action_low) / (action_high - action_low) - 1,
+            actions
+        )
+
+        # Find the closest bin centers to the normalized actions
+        discretized_actions = np.array([
+            np.abs(self.bin_centers - val).argmin()
+            for val in normalized_actions
+        ])
+
+        # Convert back to token ids
+        output_ids = self.vocab_size - discretized_actions - 1
+        output_ids = np.array(output_ids)
+        output_ids = np.where(output_ids == 31745, 31744, output_ids)
+
+        return output_ids
 
 def select_action_index(rewards, temperature=0.1):
     """
@@ -69,24 +161,20 @@ def select_action_index(rewards, temperature=0.1):
 def preprocess_actions(output_ids, action):
     # Convert arrays to numpy arrays if they aren't already
     output_ids = np.array(output_ids)
-    output_ids = np.where(output_ids == 31775, 31774, output_ids)
+    output_ids = np.where(output_ids == 31745, 31744, output_ids)
     action = np.array(action)
-    
-    # Get the majority value for the last dimension of each row
-    last_dim_values = output_ids[:, -1]
-    majority_value = np.bincount(last_dim_values).argmax()
-    
-    # Create a mask for rows where the last value matches the majority
-    majority_mask = (output_ids[:, -1] == majority_value)
-    
-    # Filter arrays to keep only rows with majority value in last dimension
-    output_ids = output_ids[majority_mask]
-    action = action[majority_mask]
     
     # Apply the original range filter
     range_mask = np.all((output_ids >= 31744) & (output_ids <= 32000), axis=1)
     output_ids = output_ids[range_mask]
     action = action[range_mask]
+    
+    return output_ids, action
+
+def get_unique_actions(output_ids, action):
+    # Convert arrays to numpy arrays if they aren't already
+    output_ids = np.array(output_ids)
+    action = np.array(action)
     
     # Get unique rows and their indices
     unique_rows, indices = np.unique(output_ids, axis=0, return_index=True)
@@ -102,7 +190,7 @@ def get_rewards(instruction, image_path, actions):
     all_rewards = []
     
     # Process actions in batches of 4
-    batch_size = 4
+    batch_size = 2
     num_batches = math.ceil(len(actions) / batch_size)
     
     for i in range(num_batches):
@@ -127,14 +215,52 @@ def get_rewards(instruction, image_path, actions):
     
     return all_rewards
 
+# def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
+#     """
+#     Get batch predictions from the batch processing server.
+    
+#     Args:
+#         instruction (str): The instruction for the robot
+#         image_path (str): Path to the input image
+#         batch_size (int, optional): Size of the batch. Defaults to 4.
+#         temperature (float, optional): Sampling temperature. Defaults to 1.0.
+    
+#     Returns:
+#         numpy.ndarray: Array of predicted actions
+#     """
+#     # Verify image exists
+#     if not os.path.exists(image_path):
+#         raise FileNotFoundError(f"Image not found at {image_path}")
+    
+#     # Prepare the payload
+#     payload = {
+#         "instruction": instruction,
+#         "image_path": image_path,
+#         "batch_size": batch_size,
+#         "temperature": temperature
+#     }
+    
+#     # Send request to server
+#     response = requests.post(
+#         "http://127.0.0.1:3200/batch",
+#         data=json.dumps(payload),
+#         headers={'Content-Type': 'application/json'}
+#     )
+    
+#     if response.status_code != 200:
+#         raise Exception(f"Error from server: {response.text}")
+    
+#     response_data = json.loads(response.text)
+#     return np.array(response_data["output_ids"]), np.array(response_data["actions"])
+
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
-    Get batch predictions from the batch processing server.
+    Get multiple predictions by making individual requests to the processing server.
     
     Args:
         instruction (str): The instruction for the robot
         image_path (str): Path to the input image
-        batch_size (int, optional): Size of the batch. Defaults to 4.
+        batch_size (int, optional): Number of predictions to get. Defaults to 4.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
     
     Returns:
@@ -144,26 +270,97 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
     
-    # Prepare the payload
+    # Prepare the base payload
     payload = {
         "instruction": instruction,
         "image_path": image_path,
-        "batch_size": batch_size,
+        "batch_size": 1,  # Always set to 1 for individual requests
         "temperature": temperature
     }
     
-    # Send request to server
-    response = requests.post(
-        "http://127.0.0.1:3200/batch",
-        data=json.dumps(payload),
-        headers={'Content-Type': 'application/json'}
-    )
+    all_output_ids = []
+    all_actions = []
     
-    if response.status_code != 200:
-        raise Exception(f"Error from server: {response.text}")
+    # Make batch_size number of individual requests
+    for _ in range(batch_size):
+        # Send request to server
+        response = requests.post(
+            "http://127.0.0.1:3200/batch",
+            data=json.dumps(payload),
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Error from server: {response.text}")
+        
+        response_data = json.loads(response.text)
+        all_output_ids.extend(response_data["output_ids"])
+        all_actions.extend(response_data["actions"])
     
-    response_data = json.loads(response.text)
-    return np.array(response_data["output_ids"]), np.array(response_data["actions"])
+    return np.array(all_output_ids), np.array(all_actions)
+
+def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
+    """
+    Generate augmented samples based on the mean and variance of a batch of actions.
+    
+    Args:
+        batch_actions: NumPy array of shape (batch_size, 7) containing a batch of actions.
+        num_samples: Number of augmented samples to generate.
+        
+    Returns:
+        NumPy array of shape (num_samples, 7) containing augmented samples.
+    """
+    print(f"\nCalculating mean and variance from batch of {len(batch_actions)} actions...")
+    
+    # Calculate mean and variance for each dimension
+    mean_values = np.mean(batch_actions, axis=0)
+    var_values = np.var(batch_actions, axis=0)
+    
+    print("Mean values per dimension:", mean_values)
+    print("Variance values per dimension:", var_values)
+    
+    # Define valid ranges for the action dimensions
+    min_values = np.array([-0.02872725307941437,
+                         -0.04170349963009357,
+                         -0.026093858778476715,
+                         -0.08092105075716972,
+                         -0.09288699507713317,
+                         -0.20718276381492615,
+                         0.0])
+    max_values = np.array([0.028309678435325586,
+                         0.040855254605412394,
+                         0.040161586627364146,
+                         0.08192047759890528,
+                         0.07792850524187081,
+                         0.20382574498653397,
+                         1.0])
+    converter = TokenActionConverter()
+    
+    # Initialize output array to hold augmented samples
+    augmented_array = np.zeros((num_samples, 7))
+    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)    
+    
+    # Generate num_samples augmented samples
+    for i in range(num_samples):
+        # Generate values using the calculated mean and variance
+        # For dimensions 0-5 (continuous values)
+        augmented_action = np.random.normal(mean_values, np.sqrt(var_values), size=7)
+        
+        # For the 7th dimension (binary), use probability based on mean
+        p_gripper = mean_values[-1]  # Probability of gripper being 1
+        augmented_action[-1] = 1.0 if mean_values[-1] >= 0.5 else 0.0
+        
+        # Clamp values to valid range for first six dimensions
+        augmented_action[:-1] = np.clip(augmented_action[:-1], min_values[:-1], max_values[:-1])
+        
+        # Store the augmented action
+        augmented_array[i] = augmented_action
+        augmented_ids[i] = converter.action_to_token(augmented_action)
+    
+    print(f"Generated {num_samples} augmented samples based on batch statistics")
+    
+    return augmented_ids, augmented_array
+
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
@@ -177,6 +374,43 @@ OPENVLA_V01_SYSTEM_PROMPT = (
     "A chat between a curious user and an artificial intelligence assistant. "
     "The assistant gives helpful, detailed, and polite answers to the user's questions."
 )
+
+def save_rollout_video(rollout_images, idx, success, task_description, log_file=None):
+    """Saves an MP4 replay of an episode."""
+    rollout_dir = f"./rollouts/{DATE}"
+    os.makedirs(rollout_dir, exist_ok=True)
+    processed_task_description = task_description.lower().replace(" ", "_").replace("\n", "_").replace(".", "_")[:50]
+    mp4_path = f"{rollout_dir}/{DATE_TIME}--episode={idx}--success={success}--task={processed_task_description}.mp4"
+    video_writer = imageio.get_writer(mp4_path, fps=30)
+    for img in rollout_images:
+        video_writer.append_data(img)
+    video_writer.close()
+    print(f"Saved rollout MP4 at path {mp4_path}")
+    if log_file is not None:
+        log_file.write(f"Saved rollout MP4 at path {mp4_path}\n")
+    return mp4_path
+    
+def get_prismatic_vla(cfg):
+    """Loads and returns a VLA model from checkpoint."""
+    # Prepare for model loading.
+    print(f"[*] Initializing Generation Playground with `{cfg.model_family}`")
+    hf_token = cfg.hf_token.read_text().strip() if isinstance(cfg.hf_token, Path) else os.environ[cfg.hf_token]
+    # set_seed(cfg.seed)
+    # Load VLA checkpoint.
+    print(f"Loading VLM from checkpoint: {cfg.pretrained_checkpoint}")
+    vla = load_vla(
+        cfg.pretrained_checkpoint,
+        hf_token=hf_token,
+        load_for_training=False,
+    )
+    for param in vla.parameters():
+        assert param.dtype == torch.float32, f"Loaded VLM parameter not in full precision: {param}"
+    # Cast to half precision.
+    vla.vision_backbone.to(dtype=vla.vision_backbone.half_precision_dtype)
+    vla.llm_backbone.to(dtype=vla.llm_backbone.half_precision_dtype)
+    vla.to(dtype=vla.llm_backbone.half_precision_dtype)
+    vla.to(DEVICE)
+    return vla
 
 
 def get_vla(cfg):
@@ -276,8 +510,34 @@ def crop_and_resize(image, crop_scale, batch_size):
     return image
 
 
+def apply_center_crop(im, t_h, t_w):
+    """
+    Source: https://github.com/ARISE-Initiative/robomimic/blob/5dee58f9cc1235010d0877142b54d0e82dd23986/robomimic/utils/obs_utils.py#L268
+
+    Takes a center crop of an image.
+
+    Args:
+        im (np.array or torch.Tensor): image of shape (..., height, width, channel)
+        t_h (int): height of crop
+        t_w (int): width of crop
+
+    Returns:
+        im (np.array or torch.Tensor): center cropped image
+    """
+    assert im.shape[-3] >= t_h and im.shape[-2] >= t_w
+    assert im.shape[-1] in [1, 3, 6]
+    crop_h = int((im.shape[-3] - t_h) / 2)
+    crop_w = int((im.shape[-2] - t_w) / 2)
+    return im[..., crop_h : crop_h + t_h, crop_w : crop_w + t_w, :]
+
+#
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
     """Generates an action with the VLA policy."""
+
+    # only supports 1 image
+    if isinstance(obs["full_image"], list):
+        obs["full_image"] = obs["full_image"][0]
+
     image = Image.fromarray(obs["full_image"])
     image = image.convert("RGB")
 
@@ -319,17 +579,67 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=50,
-        temperature=0.5
+        batch_size=5,
+        temperature=1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
+    
+    # if only one action, return the first action
+    _, unique = get_unique_actions(output_ids, actions)
+    if len(unique)==1:
+        return unique[0]
+
+    output_ids, actions = generate_augmented_samples_from_batch(
+        batch_actions=actions,
+        num_samples=32
+    )
+
+    output_ids, actions = get_unique_actions(output_ids, actions)
+    
     print(output_ids)
 
-    if len(output_ids)==1:
-        return actions[0]
-
-    reward_img = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
+    reward_img = "/root/openvla-mini/transfer_images/reward_img.jpg"
     rewards = get_rewards(instruction, reward_img, output_ids)
     selected_index = np.argmax(rewards)
 
     return actions[selected_index]
+
+
+def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
+    """Generates an action with the VLA policy."""
+
+    if not isinstance(obs["full_image"], list):
+        obs["full_image"] = [obs["full_image"]]
+
+    processed_images = []
+
+    for img in obs["full_image"]:
+        image = Image.fromarray(img)
+        image = image.convert("RGB")
+
+        # (If trained with image augmentations) Center crop image and then resize back up to original size.
+        # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), we must multiply
+        #            the original height and width by sqrt(0.9) -- not 0.9!
+        if center_crop:
+            temp_image = np.array(image)  # (H, W, C)
+            crop_scale = 0.9
+            sqrt_crop_scale = math.sqrt(crop_scale)
+            temp_image_cropped = apply_center_crop(
+                temp_image,
+                t_h=int(sqrt_crop_scale * temp_image.shape[0]),
+                t_w=int(sqrt_crop_scale * temp_image.shape[1]),
+            )
+            temp_image = Image.fromarray(temp_image_cropped)
+            temp_image = temp_image.resize(
+                image.size, Image.Resampling.BILINEAR
+            )  # IMPORTANT: dlimp uses BILINEAR resize
+            image = temp_image
+
+        processed_images.append(image)
+
+    # extract for single image
+    if len(processed_images) == 1:
+        processed_images = processed_images[0]
+
+    action = vla.predict_action(processed_images, task_label, unnorm_key=unnorm_key, **kwargs)
+    return action
