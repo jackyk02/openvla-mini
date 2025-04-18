@@ -45,6 +45,7 @@ class GenerateConfig:
     #################################################################################################################
     batch_size: int = 1                                         # Batch size for model inference
     temperature: float = 0                                   # Temperature for sampling
+    gaussian: int = 1
     model_family: str = "openvla"                               # Model family
     pretrained_checkpoint: Union[str, Path] = ""                # Pretrained checkpoint path
     load_in_8bit: bool = False                                  # (For OpenVLA only) Load with 8-bit quantization
@@ -172,7 +173,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                 break
 
         # Save a replay video of the episode
-        save_rollout_video(replay_images, episode_idx, cfg.batch_size, cfg.temperature)
+        save_rollout_video(replay_images, episode_idx, cfg.batch_size, cfg.temperature, cfg.gaussian)
 
         # [If saving rollout data] Save rollout data
         if cfg.save_data:

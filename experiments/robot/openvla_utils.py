@@ -192,7 +192,7 @@ import os
 import argparse
 import time
 
-def send_image_to_server(server_url, image_path, instruction, number_samples=8, temperature=0.5):
+def send_image_to_server(server_url, image_path, instruction, number_samples=8, temperature=0.5, gaussian_samples=10):
     """
     Send an image and instruction to the server and get the best action.
     
@@ -221,7 +221,8 @@ def send_image_to_server(server_url, image_path, instruction, number_samples=8, 
             "instruction": instruction,
             "image": img_base64,
             "number_samples": number_samples,
-            "temperature": temperature
+            "temperature": temperature,
+            "gaussian_samples": gaussian_samples
         }
         
         # Send the request to the server
@@ -287,13 +288,15 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     instruction = task_label.lower()
     number_samples = cfg.batch_size
     temperature = cfg.temperature
+    gaussian_samples = cfg.gaussian
 
     result = send_image_to_server(
         server_url=server_url,
         image_path=image_path,
         instruction=instruction,
         number_samples=number_samples,
-        temperature=temperature
+        temperature=temperature,
+        gaussian_samples=gaussian_samples
     )
     best_action = np.array(result['best_action'])
     return best_action
