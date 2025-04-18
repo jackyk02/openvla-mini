@@ -579,22 +579,13 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=5,
+        batch_size=10,
         temperature=1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
-
-    # if only one action, return the first action
-    _, unique = get_unique_actions(output_ids, actions)
-    if len(unique)==1:
-        return unique[0]
-
-    output_ids, actions = generate_augmented_samples_from_batch(
-        batch_actions=actions,
-        num_samples=32
-    )
-
     output_ids, actions = get_unique_actions(output_ids, actions)
+    if len(output_ids)==1:
+        return actions[0]
     
     print(output_ids)
 
@@ -603,7 +594,17 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     if len(actions)==1:
         return actions[0]
     rewards = get_rewards(instruction, reward_img, actions)
-    selected_index = np.argmax(rewards)
+    
+    # Implement softmax selection instead of argmax
+    beta = 1.0  # Temperature parameter, adjust as needed
+    # Convert rewards to numpy array if not already
+    rewards = np.array(rewards)
+    # Apply softmax formula: exp(Q/beta) / sum(exp(Q/beta))
+    exp_rewards = np.exp(rewards / beta)
+    softmax_probs = exp_rewards / np.sum(exp_rewards)
+    
+    # Sample action according to softmax distribution
+    selected_index = np.random.choice(len(actions), p=softmax_probs)
 
     return actions[selected_index]
 
