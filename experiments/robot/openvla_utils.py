@@ -192,7 +192,7 @@ import os
 import argparse
 import time
 
-def send_image_to_server(server_url, image_path, instruction, number_samples=8, temperature=0.5, gaussian_samples=10):
+def send_image_to_server(server_url, image_path, reward_path, instruction, number_samples=8, temperature=0.5, gaussian_samples=10):
     """
     Send an image and instruction to the server and get the best action.
     
@@ -215,11 +215,16 @@ def send_image_to_server(server_url, image_path, instruction, number_samples=8, 
         with open(image_path, "rb") as img_file:
             img_data = img_file.read()
             img_base64 = base64.b64encode(img_data).decode('utf-8')
+
+        with open(reward_path, "rb") as reward_file:
+            reward_data = reward_file.read()
+            reward_base64 = base64.b64encode(reward_data).decode('utf-8')
         
         # Prepare the request data
         payload = {
             "instruction": instruction,
             "image": img_base64,
+            "reward_image": reward_base64,
             "number_samples": number_samples,
             "temperature": temperature,
             "gaussian_samples": gaussian_samples
@@ -285,6 +290,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     
     server_url = "http://localhost:5000/process_image"
     image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/vla_processed_img.jpg"
+    reward_path = "/home/jacky/Desktop/openvla-mini/transfer_images/reward_img.jpg"
     instruction = task_label.lower()
     number_samples = cfg.batch_size
     temperature = cfg.temperature
@@ -293,6 +299,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     result = send_image_to_server(
         server_url=server_url,
         image_path=image_path,
+        reward_path=reward_path,
         instruction=instruction,
         number_samples=number_samples,
         temperature=temperature,
