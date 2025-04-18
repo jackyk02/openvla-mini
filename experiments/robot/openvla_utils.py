@@ -596,15 +596,21 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     rewards = get_rewards(instruction, reward_img, actions)
     
     # Implement softmax selection instead of argmax
-    beta = 1.0  # Temperature parameter, adjust as needed
-    # Convert rewards to numpy array if not already
-    rewards = np.array(rewards)
-    # Apply softmax formula: exp(Q/beta) / sum(exp(Q/beta))
-    exp_rewards = np.exp(rewards / beta)
-    softmax_probs = exp_rewards / np.sum(exp_rewards)
-    
-    # Sample action according to softmax distribution
-    selected_index = np.random.choice(len(actions), p=softmax_probs)
+    beta = 0  # Temperature parameter, adjust as needed
+
+    if beta == 0 or np.isclose(beta, 0):
+        # Use argmax directly when beta is zero
+        selected_index = np.argmax(rewards)
+
+    else:
+        # Convert rewards to numpy array if not already
+        rewards = np.array(rewards)
+        # Apply softmax formula: exp(Q/beta) / sum(exp(Q/beta))
+        exp_rewards = np.exp(rewards / beta)
+        softmax_probs = exp_rewards / np.sum(exp_rewards)
+        
+        # Sample action according to softmax distribution
+        selected_index = np.random.choice(len(actions), p=softmax_probs)
 
     return actions[selected_index]
 
