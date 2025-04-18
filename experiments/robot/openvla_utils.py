@@ -320,20 +320,24 @@ def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
     print("Variance values per dimension:", var_values)
     
     # Define valid ranges for the action dimensions
-    min_values = np.array([-0.02872725307941437,
-                         -0.04170349963009357,
-                         -0.026093858778476715,
-                         -0.08092105075716972,
-                         -0.09288699507713317,
-                         -0.20718276381492615,
-                         0.0])
-    max_values = np.array([0.028309678435325586,
-                         0.040855254605412394,
-                         0.040161586627364146,
-                         0.08192047759890528,
-                         0.07792850524187081,
-                         0.20382574498653397,
-                         1.0])
+    min_values = np.array([
+          -0.6348214149475098,
+          -0.7741071581840515,
+          -0.7633928656578064,
+          -0.09749999642372131,
+          -0.14819999992847435,
+          -0.2742857038974762,
+          0.0
+        ])
+    max_values = np.array([
+          0.7714285850524902,
+          0.8464285731315613,
+          0.9375,
+          0.13928571343421936,
+          0.15964286029338837,
+          0.3246428668498993,
+          1.0
+        ])
     converter = TokenActionConverter()
     
     # Initialize output array to hold augmented samples
