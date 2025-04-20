@@ -339,32 +339,29 @@ def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
           1.0
         ])
     converter = TokenActionConverter()
+        
+    # Generate all samples at once (vectorized)
+    # For dimensions 0-5 (continuous values)
+    augmented_array = np.random.normal(
+        mean_values, np.sqrt(var_values), 
+        size=(num_samples, 7)
+    )
     
-    # Initialize output array to hold augmented samples
-    augmented_array = np.zeros((num_samples, 7))
-    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)    
+    # For the 7th dimension (binary), use probability based on mean
+    augmented_array[:, -1] = (mean_values[-1] >= 0.5).astype(float)
     
-    # Generate num_samples augmented samples
+    # Clip values to valid range (vectorized operation)
+    augmented_array[:, :-1] = np.clip(
+        augmented_array[:, :-1], 
+        min_values[:-1], 
+        max_values[:-1]
+    )
+    
+    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)
     for i in range(num_samples):
-        # Generate values using the calculated mean and variance
-        # For dimensions 0-5 (continuous values)
-        augmented_action = np.random.normal(mean_values, np.sqrt(var_values), size=7)
-        
-        # For the 7th dimension (binary), use probability based on mean
-        p_gripper = mean_values[-1]  # Probability of gripper being 1
-        augmented_action[-1] = 1.0 if mean_values[-1] >= 0.5 else 0.0
-        
-        # Clamp values to valid range for first six dimensions
-        augmented_action[:-1] = np.clip(augmented_action[:-1], min_values[:-1], max_values[:-1])
-        
-        # Store the augmented action
-        augmented_array[i] = augmented_action
-        augmented_ids[i] = converter.action_to_token(augmented_action)
-    
-    print(f"Generated {num_samples} augmented samples based on batch statistics")
+        augmented_ids[i] = converter.action_to_token(augmented_array[i])
     
     return augmented_ids, augmented_array
-
 
 # Initialize important constants and pretty-printing mode in NumPy.
 ACTION_DIM = 7
