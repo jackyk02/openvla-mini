@@ -580,23 +580,25 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=5,
+        batch_size=16,
         temperature=0.1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
     
     # if only one action, return the first action
-    _, unique = get_unique_actions(output_ids, actions)
-    if len(unique)==1:
-        return unique[0]
+    # _, unique = get_unique_actions(output_ids, actions)
+    # if len(unique)==1:
+    #     return unique[0]
 
-    output_ids, actions = generate_augmented_samples_from_batch(
-        batch_actions=actions,
-        num_samples=10
-    )
+    # output_ids, actions = generate_augmented_samples_from_batch(
+    #     batch_actions=actions,
+    #     num_samples=10
+    # )
 
     output_ids, actions = get_unique_actions(output_ids, actions)
-    
+    if len(actions)==1:
+        return actions[0]
+
     print(output_ids)
 
     reward_img = "/root/openvla-mini/transfer_images/vla_processed_img.jpg"
