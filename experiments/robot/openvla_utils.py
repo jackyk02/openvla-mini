@@ -288,7 +288,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     image_path = f"{transfer_dir}/vla_processed_img.jpg"
     image.save(image_path)
     
-    server_url = "http://localhost:5000/process_image"
+    server_url = "http://localhost:6000/process_image"
     image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/vla_processed_img.jpg"
     reward_path = "/home/jacky/Desktop/openvla-mini/transfer_images/reward_img.jpg"
     instruction = task_label.lower()
