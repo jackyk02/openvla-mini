@@ -43,9 +43,9 @@ class GenerateConfig:
     #################################################################################################################
     # Model-specific parameters
     #################################################################################################################
-    batch_size: int = 1                                         # Batch size for model inference
-    temperature: float = 0                                   # Temperature for sampling
-    gaussian: int = 1
+    batch_size: int = 5                                         # Batch size for model inference
+    temperature: float = 1.0                                   # Temperature for sampling
+    gaussian: int = 16
     model_family: str = "openvla"                               # Model family
     pretrained_checkpoint: Union[str, Path] = ""                # Pretrained checkpoint path
     load_in_8bit: bool = False                                  # (For OpenVLA only) Load with 8-bit quantization

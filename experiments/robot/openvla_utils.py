@@ -192,7 +192,7 @@ import os
 import argparse
 import time
 
-def send_image_to_server(server_url, image_path, reward_path, instruction, number_samples=8, temperature=0.5, gaussian_samples=10):
+def send_image_to_server(server_url, image_path, reward_path, instruction, number_samples=5, temperature=1.0, gaussian_samples=16):
     """
     Send an image and instruction to the server and get the best action.
     
