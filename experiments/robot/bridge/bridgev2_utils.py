@@ -123,8 +123,8 @@ def save_reward_img(image):
     image = image.numpy()
 
     import os
-    os.makedirs("/root/openvla-mini/transfer_images/", exist_ok=True)
-    Image.fromarray(image).save(f"/root/openvla-mini/transfer_images/reward_img.jpg")
+    os.makedirs("/home/jacky/Desktop/openvla-mini/transfer_images/", exist_ok=True)
+    Image.fromarray(image).save(f"/home/jacky/Desktop/openvla-mini/transfer_images/reward_img.jpg")
 
 def process_image(image_path, output_dir="./transfer_images/", crop_scale=0.9, target_size=(224, 224), batch_size=1):
     """
