@@ -320,44 +320,46 @@ def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
     print("Variance values per dimension:", var_values)
     
     # Define valid ranges for the action dimensions
-    min_values = np.array([-0.02872725307941437,
-                         -0.04170349963009357,
-                         -0.026093858778476715,
-                         -0.08092105075716972,
-                         -0.09288699507713317,
-                         -0.20718276381492615,
-                         0.0])
-    max_values = np.array([0.028309678435325586,
-                         0.040855254605412394,
-                         0.040161586627364146,
-                         0.08192047759890528,
-                         0.07792850524187081,
-                         0.20382574498653397,
-                         1.0])
+    min_values = np.array([
+          -0.6348214149475098,
+          -0.7741071581840515,
+          -0.7633928656578064,
+          -0.09749999642372131,
+          -0.14819999992847435,
+          -0.2742857038974762,
+          0.0
+        ])
+    max_values = np.array([
+          0.7714285850524902,
+          0.8464285731315613,
+          0.9375,
+          0.13928571343421936,
+          0.15964286029338837,
+          0.3246428668498993,
+          1.0
+        ])
     converter = TokenActionConverter()
+        
+    # Generate all samples at once (vectorized)
+    # For dimensions 0-5 (continuous values)
+    augmented_array = np.random.normal(
+        mean_values, np.sqrt(var_values), 
+        size=(num_samples, 7)
+    )
     
-    # Initialize output array to hold augmented samples
-    augmented_array = np.zeros((num_samples, 7))
-    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)    
+    # For the 7th dimension (binary), use probability based on mean
+    augmented_array[:, -1] = (mean_values[-1] >= 0.5).astype(float)
     
-    # Generate num_samples augmented samples
+    # Clip values to valid range (vectorized operation)
+    augmented_array[:, :-1] = np.clip(
+        augmented_array[:, :-1], 
+        min_values[:-1], 
+        max_values[:-1]
+    )
+    
+    augmented_ids = np.zeros((num_samples, 7), dtype=np.int64)
     for i in range(num_samples):
-        # Generate values using the calculated mean and variance
-        # For dimensions 0-5 (continuous values)
-        augmented_action = np.random.normal(mean_values, np.sqrt(var_values), size=7)
-        
-        # For the 7th dimension (binary), use probability based on mean
-        p_gripper = mean_values[-1]  # Probability of gripper being 1
-        augmented_action[-1] = 1.0 if mean_values[-1] >= 0.5 else 0.0
-        
-        # Clamp values to valid range for first six dimensions
-        augmented_action[:-1] = np.clip(augmented_action[:-1], min_values[:-1], max_values[:-1])
-        
-        # Store the augmented action
-        augmented_array[i] = augmented_action
-        augmented_ids[i] = converter.action_to_token(augmented_action)
-    
-    print(f"Generated {num_samples} augmented samples based on batch statistics")
+        augmented_ids[i] = converter.action_to_token(augmented_array[i])
     
     return augmented_ids, augmented_array
 
