@@ -190,7 +190,7 @@ def get_rewards(instruction, image_path, actions):
     all_rewards = []
     
     # Process actions in batches of 4
-    batch_size = 16
+    batch_size = 50
     num_batches = math.ceil(len(actions) / batch_size)
     
     for i in range(num_batches):
@@ -215,52 +215,14 @@ def get_rewards(instruction, image_path, actions):
     
     return all_rewards
 
-# def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
-#     """
-#     Get batch predictions from the batch processing server.
-    
-#     Args:
-#         instruction (str): The instruction for the robot
-#         image_path (str): Path to the input image
-#         batch_size (int, optional): Size of the batch. Defaults to 4.
-#         temperature (float, optional): Sampling temperature. Defaults to 1.0.
-    
-#     Returns:
-#         numpy.ndarray: Array of predicted actions
-#     """
-#     # Verify image exists
-#     if not os.path.exists(image_path):
-#         raise FileNotFoundError(f"Image not found at {image_path}")
-    
-#     # Prepare the payload
-#     payload = {
-#         "instruction": instruction,
-#         "image_path": image_path,
-#         "batch_size": batch_size,
-#         "temperature": temperature
-#     }
-    
-#     # Send request to server
-#     response = requests.post(
-#         "http://127.0.0.1:3200/batch",
-#         data=json.dumps(payload),
-#         headers={'Content-Type': 'application/json'}
-#     )
-    
-#     if response.status_code != 200:
-#         raise Exception(f"Error from server: {response.text}")
-    
-#     response_data = json.loads(response.text)
-#     return np.array(response_data["output_ids"]), np.array(response_data["actions"])
-
 def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
     """
-    Get multiple predictions by making individual requests to the processing server.
+    Get batch predictions from the batch processing server.
     
     Args:
         instruction (str): The instruction for the robot
         image_path (str): Path to the input image
-        batch_size (int, optional): Number of predictions to get. Defaults to 4.
+        batch_size (int, optional): Size of the batch. Defaults to 4.
         temperature (float, optional): Sampling temperature. Defaults to 1.0.
     
     Returns:
@@ -270,34 +232,72 @@ def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, te
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image not found at {image_path}")
     
-    # Prepare the base payload
+    # Prepare the payload
     payload = {
         "instruction": instruction,
         "image_path": image_path,
-        "batch_size": 1,  # Always set to 1 for individual requests
+        "batch_size": batch_size,
         "temperature": temperature
     }
     
-    all_output_ids = []
-    all_actions = []
+    # Send request to server
+    response = requests.post(
+        "http://127.0.0.1:3200/batch",
+        data=json.dumps(payload),
+        headers={'Content-Type': 'application/json'}
+    )
     
-    # Make batch_size number of individual requests
-    for _ in range(batch_size):
-        # Send request to server
-        response = requests.post(
-            "http://127.0.0.1:3200/batch",
-            data=json.dumps(payload),
-            headers={'Content-Type': 'application/json'}
-        )
-        
-        if response.status_code != 200:
-            raise Exception(f"Error from server: {response.text}")
-        
-        response_data = json.loads(response.text)
-        all_output_ids.extend(response_data["output_ids"])
-        all_actions.extend(response_data["actions"])
+    if response.status_code != 200:
+        raise Exception(f"Error from server: {response.text}")
     
-    return np.array(all_output_ids), np.array(all_actions)
+    response_data = json.loads(response.text)
+    return np.array(response_data["output_ids"]), np.array(response_data["actions"])
+
+# def get_batch_actions(instruction: str, image_path: str, batch_size: int = 4, temperature: float = 1.0):
+#     """
+#     Get multiple predictions by making individual requests to the processing server.
+    
+#     Args:
+#         instruction (str): The instruction for the robot
+#         image_path (str): Path to the input image
+#         batch_size (int, optional): Number of predictions to get. Defaults to 4.
+#         temperature (float, optional): Sampling temperature. Defaults to 1.0.
+    
+#     Returns:
+#         numpy.ndarray: Array of predicted actions
+#     """
+#     # Verify image exists
+#     if not os.path.exists(image_path):
+#         raise FileNotFoundError(f"Image not found at {image_path}")
+    
+#     # Prepare the base payload
+#     payload = {
+#         "instruction": instruction,
+#         "image_path": image_path,
+#         "batch_size": 1,  # Always set to 1 for individual requests
+#         "temperature": temperature
+#     }
+    
+#     all_output_ids = []
+#     all_actions = []
+    
+#     # Make batch_size number of individual requests
+#     for _ in range(batch_size):
+#         # Send request to server
+#         response = requests.post(
+#             "http://127.0.0.1:3200/batch",
+#             data=json.dumps(payload),
+#             headers={'Content-Type': 'application/json'}
+#         )
+        
+#         if response.status_code != 200:
+#             raise Exception(f"Error from server: {response.text}")
+        
+#         response_data = json.loads(response.text)
+#         all_output_ids.extend(response_data["output_ids"])
+#         all_actions.extend(response_data["actions"])
+    
+#     return np.array(all_output_ids), np.array(all_actions)
 
 def generate_augmented_samples_from_batch(batch_actions, num_samples=100):
     """
