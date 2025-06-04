@@ -102,7 +102,7 @@ def get_rewards(instruction, image_path, actions):
     all_rewards = []
     
     # Process actions in batches of 4
-    batch_size = 4
+    batch_size = 32
     num_batches = math.ceil(len(actions) / batch_size)
     
     for i in range(num_batches):
@@ -319,8 +319,8 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     output_ids, actions = get_batch_actions(
         instruction=instruction,
         image_path=image_path,
-        batch_size=50,
-        temperature=0.5
+        batch_size=32,
+        temperature=0.1
     )
     output_ids, actions = preprocess_actions(output_ids, actions)
     print(output_ids)
