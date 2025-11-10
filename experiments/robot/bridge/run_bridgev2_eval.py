@@ -69,7 +69,7 @@ class GenerateConfig:
 
     blocking: bool = False                                      # Whether to use blocking control
     max_episodes: int = 50                                      # Max number of episodes to run
-    max_steps: int = 60                                         # Max number of timesteps per episode
+    max_steps: int = 150                                         # Max number of timesteps per episode
     control_frequency: float = 5                                # WidowX control frequency
 
     #################################################################################################################
@@ -140,7 +140,7 @@ def eval_model_in_bridge_env(cfg: GenerateConfig) -> None:
                     replay_images.append(obs["full_image"])
 
                     # Get preprocessed image
-                    obs["full_image"] = get_preprocessed_image(obs, resize_size)
+                    # obs["full_image"] = get_preprocessed_image(obs, resize_size)
 
                     # Query model to get action
                     action = get_action(
