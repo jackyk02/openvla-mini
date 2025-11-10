@@ -192,72 +192,158 @@ import os
 import argparse
 import time
 
-def send_image_to_server(server_url, image_path, instruction, number_samples=8, temperature=0.5):
+_SIMPLER_SERVER_BASE = os.environ.get("SIMPLER_SERVER_BASE", "http://localhost:5001")
+_PROCESS_ENDPOINT = f"{_SIMPLER_SERVER_BASE}/process_action"
+_RESET_ENDPOINT = f"{_SIMPLER_SERVER_BASE}/reset_session"
+
+# Maintain a simple client-side timestep counter to align with server-side action queueing
+_client_timestep = 0
+_session_initialized = False
+
+def _reset_simpler_session():
+    try:
+        resp = requests.post(_RESET_ENDPOINT, json={"timestep": 0}, headers={"Content-Type": "application/json"})
+        # Even if non-200, proceed; server has a global error handler and will respond with JSON
+    except Exception:
+        pass
+
+def send_image_to_server(server_url, image_np, instruction, observation_state, timestep, original_instruction=None):
     """
-    Send an image and instruction to the server and get the best action.
-    
+    Send a raw RGB image (np.ndarray), instruction, proprioception and timestep to SIMPLER server.
+
     Args:
-        server_url (str): URL of the server endpoint
-        image_path (str): Path to the image file
-        instruction (str): The instruction for the image
-        number_samples (int): Number of samples to generate
-        temperature (float): Temperature for action generation
-        
+        server_url (str): Full URL to /process_action endpoint.
+        image_np (np.ndarray): Raw HxWx3 RGB image from BridgeV2 (uint8).
+        instruction (str): Instruction text for this step.
+        observation_state (Union[list, np.ndarray, dict]): Proprioception/state for adapter.
+        timestep (int): Global timestep within episode (starts at 0).
+        original_instruction (str, optional): Original instruction for rephrase matching.
+
     Returns:
-        dict: Server response containing the best action
+        dict: Server JSON response, or dict with 'error' key on failure.
     """
     try:
-        # Check if the image exists
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
-        
-        # Read and encode the image
-        with open(image_path, "rb") as img_file:
-            img_data = img_file.read()
-            img_base64 = base64.b64encode(img_data).decode('utf-8')
-        
-        # Prepare the request data
+        if not isinstance(image_np, np.ndarray):
+            return {"error": "image_np must be a numpy array"}
+        if image_np.ndim != 3 or image_np.shape[2] != 3:
+            return {"error": f"Expected RGB image HxWx3, got shape {image_np.shape}"}
+
+        # Encode image as base64
+        pil_img = Image.fromarray(image_np.astype(np.uint8))
+        import io
+        buf = io.BytesIO()
+        pil_img.save(buf, format="JPEG")
+        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        # Convert observation_state to JSON-serializable structure
+        if isinstance(observation_state, np.ndarray):
+            obs_state_payload = observation_state.tolist()
+        else:
+            obs_state_payload = observation_state
+
         payload = {
             "instruction": instruction,
+            "original_instruction": original_instruction if original_instruction is not None else instruction,
             "image": img_base64,
-            "number_samples": number_samples,
-            "temperature": temperature
+            "observation_state": obs_state_payload,
+            "timestep": int(timestep),
         }
-        
-        # Send the request to the server
+
         response = requests.post(
             server_url,
             json=payload,
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
+            timeout=15,
         )
-        
-        # Check if the request was successful
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return {"error": f"Server returned status code {response.status_code}: {response.text}"}
-            
+
+        try:
+            resp_json = response.json()
+        except Exception:
+            resp_json = {"error": f"Non-JSON response: {response.text}"}
+
+        if response.status_code != 200:
+            if "error" not in resp_json:
+                resp_json["error"] = f"Status {response.status_code}: {response.text}"
+        return resp_json
     except Exception as e:
         return {"error": str(e)}
 
 #
 def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
-    """Generates an action with the VLA policy."""
-    server_url = "http://localhost:5000/process_image"
-    image_path = "/home/jacky/Desktop/openvla-mini/transfer_images/img256.jpg"
-    instruction = task_label.lower()
-    number_samples = 1
-    temperature = 0
+    """Generates an action by querying the external SIMPLER PI0 server."""
+    global _client_timestep, _session_initialized
 
-    result = send_image_to_server(
-        server_url=server_url,
-        image_path=image_path,
+    # Choose raw image from obs; prefer 'image_primary' (untouched), fallback to 'full_image'
+    if "image_primary" in obs:
+        raw_image = obs["image_primary"]
+    else:
+        raw_image = obs.get("full_image", None)
+    if raw_image is None:
+        raise ValueError("Observation missing image data: expected 'image_primary' or 'full_image'.")
+
+    # Proprioception (BridgeV2 proprio is 7-D)
+    if "proprio" not in obs:
+        raise ValueError("Observation missing 'proprio' key required by SIMPLER server.")
+    proprio = obs["proprio"]
+    if isinstance(proprio, np.ndarray):
+        if proprio.size != 7:
+            # Allow any size but warn; server adapter will handle shape if possible
+            pass
+    else:
+        proprio = np.array(proprio)
+
+    # Ensure session is initialized/reset on first use
+    if not _session_initialized:
+        _reset_simpler_session()
+        _client_timestep = 0
+        _session_initialized = True
+
+    # Prepare and send request
+    instruction = task_label
+    resp = send_image_to_server(
+        server_url=_PROCESS_ENDPOINT,
+        image_np=raw_image,
         instruction=instruction,
-        number_samples=number_samples,
-        temperature=temperature
+        observation_state=proprio,
+        timestep=_client_timestep,
+        original_instruction=task_label,
     )
-    best_action = np.array(result['best_action'])
-    return best_action
+
+    # Handle potential queue desync by resetting session and retrying once
+    should_retry = False
+    if isinstance(resp, dict) and "error" in resp:
+        err_msg = str(resp.get("error", "")).lower()
+        if "no action queue available" in err_msg or "action queue is empty" in err_msg:
+            should_retry = True
+    if should_retry:
+        _reset_simpler_session()
+        _client_timestep = 0
+        resp = send_image_to_server(
+            server_url=_PROCESS_ENDPOINT,
+            image_np=raw_image,
+            instruction=instruction,
+            observation_state=proprio,
+            timestep=_client_timestep,
+            original_instruction=task_label,
+        )
+
+    if not isinstance(resp, dict):
+        raise RuntimeError(f"Unexpected server response type: {type(resp)}")
+    if "error" in resp:
+        raise RuntimeError(f"SIMPLER server error: {resp['error']}")
+    if "action" not in resp:
+        raise RuntimeError(f"SIMPLER server response missing 'action': {resp}")
+
+    action = np.array(resp["action"], dtype=np.float32)
+    if action.shape != (7,):
+        # Attempt to flatten if possible
+        action = action.reshape(-1)
+    if action.shape[0] != 7:
+        raise ValueError(f"Expected action of length 7, got shape {action.shape}")
+
+    # Advance timestep for next call
+    _client_timestep += 1
+    return action
 
     # # only supports 1 image
     # if isinstance(obs["full_image"], list):
