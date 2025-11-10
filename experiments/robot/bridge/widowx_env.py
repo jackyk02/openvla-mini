@@ -11,6 +11,7 @@ from typing import Dict
 import gym
 import numpy as np
 from pyquaternion import Quaternion
+from transforms3d.euler import euler2quat
 from widowx_envs.widowx_env_service import WidowXClient
 
 
@@ -42,8 +43,14 @@ def convert_obs(obs, im_size):
     """Preprocesses image and proprio observations."""
     # Preprocess image
     image_obs = (obs["image"].reshape(3, im_size, im_size).transpose(1, 2, 0) * 255).astype(np.uint8)
-    # Add padding to proprio to match RLDS training
-    proprio = np.concatenate([obs["state"][:6], [0], obs["state"][-1:]])
+    
+    # Convert proprio from Bridge format (xyz + sxyz euler) to Simpler format (xyz + wxyz quat)
+    xyz = obs["state"][:3]  # XYZ position
+    euler_sxyz = obs["state"][3:6]  # sxyz Euler angles
+    quat_wxyz = euler2quat(euler_sxyz[0], euler_sxyz[1], euler_sxyz[2], 'sxyz')  # Convert to wxyz quaternion
+    gripper = obs["state"][-1:]  # Gripper state
+    proprio = np.concatenate([xyz, quat_wxyz, gripper])  # xyz (3) + wxyz quat (4) + gripper (1) = 8
+    
     return {
         "image_primary": image_obs,
         "full_image": obs["full_image"],
