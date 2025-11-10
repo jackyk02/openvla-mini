@@ -78,16 +78,41 @@ def get_image_resize_size(cfg):
     return resize_size
 
 
-def get_action(cfg, model, obs, task_label, processor=None):
-    """Queries the model to get an action."""
+def get_action(cfg, model, obs, task_label, processor=None, timestep=0, original_instruction=None, server_url=None):
+    """
+    Queries the model to get an action.
+    
+    Args:
+        cfg: Configuration object
+        model: Model object
+        obs: Observation dictionary
+        task_label: Task instruction
+        processor: Processor object (optional)
+        timestep: Current timestep (for server-based policies)
+        original_instruction: Original instruction for rephrased lookup (for server-based policies)
+        server_url: Server URL (for server-based policies)
+    
+    Returns:
+        np.ndarray: Action array
+    """
     if cfg.model_family == "prismatic":
         action = get_prismatic_vla_action(
             model, processor, cfg.pretrained_checkpoint, obs, task_label, cfg.unnorm_key, center_crop=cfg.center_crop
         )
         assert action.shape == (ACTION_DIM,)
     elif cfg.model_family == "openvla":
+        # Build kwargs for optional parameters
+        kwargs = {
+            'timestep': timestep,
+        }
+        if original_instruction is not None:
+            kwargs['original_instruction'] = original_instruction
+        if server_url is not None:
+            kwargs['server_url'] = server_url
+            
         action = get_vla_action(
-            model, processor, cfg.pretrained_checkpoint, obs, task_label, cfg.unnorm_key, center_crop=cfg.center_crop
+            model, processor, cfg.pretrained_checkpoint, obs, task_label, cfg.unnorm_key, 
+            center_crop=cfg.center_crop, **kwargs
         )
         assert action.shape == (ACTION_DIM,)
     else:

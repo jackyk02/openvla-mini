@@ -192,211 +192,122 @@ import os
 import argparse
 import time
 
-_SIMPLER_SERVER_BASE = os.environ.get("SIMPLER_SERVER_BASE", "http://localhost:5001")
-_PROCESS_ENDPOINT = f"{_SIMPLER_SERVER_BASE}/process_action"
-_RESET_ENDPOINT = f"{_SIMPLER_SERVER_BASE}/reset_session"
-
-# Maintain a simple client-side timestep counter to align with server-side action queueing
-_client_timestep = 0
-_session_initialized = False
-
-def _reset_simpler_session():
-    try:
-        resp = requests.post(_RESET_ENDPOINT, json={"timestep": 0}, headers={"Content-Type": "application/json"})
-        # Even if non-200, proceed; server has a global error handler and will respond with JSON
-    except Exception:
-        pass
-
-def send_image_to_server(server_url, image_np, instruction, observation_state, timestep, original_instruction=None):
+def send_image_to_server(server_url, image, instruction, observation_state, timestep, original_instruction=None):
     """
-    Send a raw RGB image (np.ndarray), instruction, proprioception and timestep to SIMPLER server.
-
+    Send an image, instruction, and observation state to the SIMPLER server to get action.
+    
     Args:
-        server_url (str): Full URL to /process_action endpoint.
-        image_np (np.ndarray): Raw HxWx3 RGB image from BridgeV2 (uint8).
-        instruction (str): Instruction text for this step.
-        observation_state (Union[list, np.ndarray, dict]): Proprioception/state for adapter.
-        timestep (int): Global timestep within episode (starts at 0).
-        original_instruction (str, optional): Original instruction for rephrase matching.
-
+        server_url (str): URL of the server endpoint (e.g., "http://localhost:5001/process_action")
+        image (np.ndarray or PIL.Image): The image to send (will be converted to base64)
+        instruction (str): The task instruction
+        observation_state (np.ndarray or dict): Proprioceptive state (7-element array or dict with 'agent' key)
+        timestep (int): Current timestep in the episode
+        original_instruction (str, optional): Original instruction for rephrased lookup. Defaults to instruction.
+        
     Returns:
-        dict: Server JSON response, or dict with 'error' key on failure.
+        dict: Server response containing action and other info
     """
     try:
-        if not isinstance(image_np, np.ndarray):
-            return {"error": "image_np must be a numpy array"}
-        if image_np.ndim != 3 or image_np.shape[2] != 3:
-            return {"error": f"Expected RGB image HxWx3, got shape {image_np.shape}"}
-
-        # Encode image as base64
-        pil_img = Image.fromarray(image_np.astype(np.uint8))
+        # Convert image to PIL Image if it's a numpy array
+        if isinstance(image, np.ndarray):
+            image = Image.fromarray(image)
+        
+        # Convert PIL Image to base64
         import io
-        buf = io.BytesIO()
-        pil_img.save(buf, format="JPEG")
-        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        # Convert observation_state to JSON-serializable structure
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG")
+        img_data = buffer.getvalue()
+        img_base64 = base64.b64encode(img_data).decode('utf-8')
+        
+        # Convert observation_state to list if it's a numpy array
         if isinstance(observation_state, np.ndarray):
-            obs_state_payload = observation_state.tolist()
-        else:
-            obs_state_payload = observation_state
-
+            observation_state = observation_state.tolist()
+        
+        # Prepare the request data
         payload = {
             "instruction": instruction,
-            "original_instruction": original_instruction if original_instruction is not None else instruction,
+            "original_instruction": original_instruction if original_instruction else instruction,
             "image": img_base64,
-            "observation_state": obs_state_payload,
-            "timestep": int(timestep),
+            "observation_state": observation_state,
+            "timestep": timestep
         }
-
+        
+        # Send the request to the server
         response = requests.post(
             server_url,
             json=payload,
             headers={"Content-Type": "application/json"},
-            timeout=15,
+            timeout=60  # Add timeout for long-running verifier computations
         )
-
-        try:
-            resp_json = response.json()
-        except Exception:
-            resp_json = {"error": f"Non-JSON response: {response.text}"}
-
-        if response.status_code != 200:
-            if "error" not in resp_json:
-                resp_json["error"] = f"Status {response.status_code}: {response.text}"
-        return resp_json
+        
+        # Check if the request was successful
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"error": f"Server returned status code {response.status_code}: {response.text}"}
+            
     except Exception as e:
         return {"error": str(e)}
 
-#
-def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False):
-    """Generates an action by querying the external SIMPLER PI0 server."""
-    global _client_timestep, _session_initialized
-
-    # Choose raw image from obs; prefer 'image_primary' (untouched), fallback to 'full_image'
-    if "image_primary" in obs:
-        raw_image = obs["image_primary"]
-    else:
-        raw_image = obs.get("full_image", None)
-    if raw_image is None:
-        raise ValueError("Observation missing image data: expected 'image_primary' or 'full_image'.")
-
-    # Proprioception (BridgeV2 proprio is 7-D)
-    if "proprio" not in obs:
-        raise ValueError("Observation missing 'proprio' key required by SIMPLER server.")
-    proprio = obs["proprio"]
-    if isinstance(proprio, np.ndarray):
-        if proprio.size != 7:
-            # Allow any size but warn; server adapter will handle shape if possible
-            pass
-    else:
-        proprio = np.array(proprio)
-
-    # Ensure session is initialized/reset on first use
-    if not _session_initialized:
-        _reset_simpler_session()
-        _client_timestep = 0
-        _session_initialized = True
-
-    # Prepare and send request
-    instruction = task_label
-    resp = send_image_to_server(
-        server_url=_PROCESS_ENDPOINT,
-        image_np=raw_image,
+def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, 
+                   timestep=0, original_instruction=None, server_url="http://localhost:5001/process_action"):
+    """
+    Generates an action with the VLA policy by calling the SIMPLER server API.
+    
+    Args:
+        vla: VLA model (not used when calling server, kept for compatibility)
+        processor: Processor (not used when calling server, kept for compatibility)
+        base_vla_name: Base VLA name (not used when calling server, kept for compatibility)
+        obs (dict): Observation dictionary containing 'full_image' and 'proprio' keys
+        task_label (str): Task instruction
+        unnorm_key: Unnormalization key (not used when calling server, kept for compatibility)
+        center_crop (bool): Center crop flag (not used when calling server, kept for compatibility)
+        timestep (int): Current timestep in the episode (important for action queue management)
+        original_instruction (str, optional): Original instruction for rephrased lookup. Defaults to task_label.
+        server_url (str): URL of the SIMPLER server endpoint
+        
+    Returns:
+        np.ndarray: Action array of shape (7,)
+    """
+    # Extract image and observation state from obs
+    image = obs["full_image"]
+    
+    # Handle list of images (take first one)
+    if isinstance(image, list):
+        image = image[0]
+    
+    # Get proprioceptive state
+    observation_state = obs.get("proprio", None)
+    if observation_state is None:
+        raise ValueError("obs must contain 'proprio' key with proprioceptive state")
+    
+    # Prepare instruction
+    instruction = task_label.lower()
+    
+    # Call server API
+    result = send_image_to_server(
+        server_url=server_url,
+        image=image,
         instruction=instruction,
-        observation_state=proprio,
-        timestep=_client_timestep,
-        original_instruction=task_label,
+        observation_state=observation_state,
+        timestep=timestep,
+        original_instruction=original_instruction if original_instruction else instruction
     )
-
-    # Handle potential queue desync by resetting session and retrying once
-    should_retry = False
-    if isinstance(resp, dict) and "error" in resp:
-        err_msg = str(resp.get("error", "")).lower()
-        if "no action queue available" in err_msg or "action queue is empty" in err_msg:
-            should_retry = True
-    if should_retry:
-        _reset_simpler_session()
-        _client_timestep = 0
-        resp = send_image_to_server(
-            server_url=_PROCESS_ENDPOINT,
-            image_np=raw_image,
-            instruction=instruction,
-            observation_state=proprio,
-            timestep=_client_timestep,
-            original_instruction=task_label,
-        )
-
-    if not isinstance(resp, dict):
-        raise RuntimeError(f"Unexpected server response type: {type(resp)}")
-    if "error" in resp:
-        raise RuntimeError(f"SIMPLER server error: {resp['error']}")
-    if "action" not in resp:
-        raise RuntimeError(f"SIMPLER server response missing 'action': {resp}")
-
-    action = np.array(resp["action"], dtype=np.float32)
-    if action.shape != (7,):
-        # Attempt to flatten if possible
-        action = action.reshape(-1)
-    if action.shape[0] != 7:
-        raise ValueError(f"Expected action of length 7, got shape {action.shape}")
-
-    # Advance timestep for next call
-    _client_timestep += 1
+    
+    # Check for errors
+    if "error" in result:
+        raise RuntimeError(f"Server error: {result['error']}")
+    
+    # Extract action from response
+    action = np.array(result['action'])
+    
+    # Optionally log additional info
+    if result.get('verifier_score') is not None:
+        print(f"Verifier score: {result['verifier_score']:.4f}")
+    if result.get('selected_instruction') != instruction:
+        print(f"Selected instruction: {result['selected_instruction']}")
+    
     return action
-
-    # # only supports 1 image
-    # if isinstance(obs["full_image"], list):
-    #     obs["full_image"] = obs["full_image"][0]
-
-    # image = Image.fromarray(obs["full_image"])
-    # image = image.convert("RGB")
-
-    # # (If trained with image augmentations) Center crop image and then resize back up to original size.
-    # # IMPORTANT: Let's say crop scale == 0.9. To get the new height and width (post-crop), multiply
-    # #            the original height and width by sqrt(0.9) -- not 0.9!
-    # if center_crop:
-    #     batch_size = 1
-    #     crop_scale = 0.9
-
-    #     # Convert to TF Tensor and record original data type (should be tf.uint8)
-    #     image = tf.convert_to_tensor(np.array(image))
-    #     orig_dtype = image.dtype
-
-    #     # Convert to data type tf.float32 and values between [0,1]
-    #     image = tf.image.convert_image_dtype(image, tf.float32)
-
-    #     # Crop and then resize back to original size
-    #     image = crop_and_resize(image, crop_scale, batch_size)
-
-    #     # Convert back to original data type
-    #     image = tf.clip_by_value(image, 0, 1)
-    #     image = tf.image.convert_image_dtype(image, orig_dtype, saturate=True)
-
-    #     # Convert back to PIL Image
-    #     image = Image.fromarray(image.numpy())
-    #     image = image.convert("RGB")
-
-    #     # Save processed image and path for Inference
-    #     transfer_dir = f"./transfer_images/"
-    #     os.makedirs(transfer_dir, exist_ok=True)
-    #     image_path = f"{transfer_dir}/vla_processed_img.jpg"
-    #     image.save(image_path)
-
-    # # Build VLA prompt
-    # if "openvla-v01" in base_vla_name:  # OpenVLA v0.1
-    #     prompt = (
-    #         f"{OPENVLA_V01_SYSTEM_PROMPT} USER: What action should the robot take to {task_label.lower()}? ASSISTANT:"
-    #     )
-    # else:  # OpenVLA
-    #     prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
-
-    # # Process inputs.
-    # inputs = processor(prompt, image).to(DEVICE, dtype=torch.bfloat16)
-
-    # # Get action.
-    # action = vla.predict_action(**inputs, unnorm_key=unnorm_key, do_sample=False)
-    # return action
 
 
 def get_prismatic_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, center_crop=False, **kwargs):
