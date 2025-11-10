@@ -222,13 +222,13 @@ def send_image_to_server(server_url, image, instruction, observation_state, time
         # Convert observation_state to list if it's a numpy array
         if isinstance(observation_state, np.ndarray):
             observation_state = observation_state.tolist()
-        
+        input_observation = {'agent': {'eef_pos': observation_state}}
         # Prepare the request data
         payload = {
             "instruction": instruction,
             "original_instruction": original_instruction if original_instruction else instruction,
             "image": img_base64,
-            "observation_state": observation_state,
+            "observation_state": input_observation,
             "timestep": timestep
         }
         
