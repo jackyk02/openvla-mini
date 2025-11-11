@@ -304,7 +304,7 @@ def get_vla_action(vla, processor, base_vla_name, obs, task_label, unnorm_key, c
     # Optionally log additional info
     if result.get('verifier_score') is not None:
         print(f"Verifier score: {result['verifier_score']:.4f}")
-    if result.get('selected_instruction') != instruction:
+    if result.get('selected_instruction') is not None:
         print(f"Selected instruction: {result['selected_instruction']}")
     
     return action
